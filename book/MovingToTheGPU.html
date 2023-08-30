@@ -1,0 +1,94 @@
+<meta charset="utf-8">
+<link rel="icon" type="image/png" href="../favicon.png">
+<!-- Markdeep: https://casual-effects.com/markdeep/ -->
+
+                                  **Ray Tracing: Moving to the GPU**
+                                           [Arman Uguray][]
+                                                <br>
+                                                Draft
+                                                <br>
+
+Introduction
+====================================================================================================
+If you ever build your own path tracer you'll quickly appreciate the quality of the images you can
+get with relatively few lines of code. You'll also notice that rendering an image takes a long time.
+A path tracer estimates _Global Illumination_ by tracing tens of millions of rays through the scene.
+The results are photorealistic because they can be close to physically accurate but that comes at a
+high computational cost. This has historically made path tracing unsuitable for real-time
+applications.
+
+Fortunately -- like most applications in Computer Graphics -- the algorithm lends itself very well
+to parallelism and we can use a GPU to exploit this to massively speed up render times. In this book
+I'll show you a way to write a GPU accelerated path tracer targeting a modern GPU API. I'll focus on
+building a renderer that can produce high quality and correct images using a fairly simple design.
+It won't be full-featured and its performance will be limited, but it can serve as a great starting
+point for extensions and experiments with more advanced GPU techniques.
+
+This book primarily focuses on GPU programming fundamentals. It follows the same progression found
+in Peter Shirley's [_Ray Tracing In One Weekend_][RTIOW], which is the first in a [brilliant series
+of books](https://raytracing.github.io) that guide you through building a CPU path tracer. I cover a
+lot of the same material but I highly recommend that you at least complete _In One Weekend_ before
+embarking on building the GPU version -- doing so will teach you the path tracing algorithm in a
+much simpler way and it will make you appreciate both the advantages and the challenges of moving to
+a GPU-based architecture.
+
+Targeting a GPU requires you to program in a way that is different from how you would typically
+approach a CPU program and taking full advantage of the hardware requires very careful tuning given
+its architecture and capabilities. I discuss performance considerations when they matter but I have
+generally avoided optimizations and instead prioritized simplicity. There are endless ways to
+optimize and re-design the code which are left for the reader to explore.
+
+With that being said, the code you'll build by the end of this book can achieve high frame rates on
+a decent enough GPU.[^syntax] The performance will highly depend on your GPU but you should
+generally be able to achieve near-interactive rates with a small amount of tuning.
+
+If you run into any problems with your implementation, have general questions or corrections, or
+would like to share own ideas or work, check out [the GitHub Discussions forum][discussions].
+
+Finally, I'd like to extend a special thank you to [Steve Hollasch][] and [Trevor David Black][] for
+their guidance and for allowing me to host this book under the [Ray Tracing GitHub
+project][rt-project].
+
+[^syntax]: A BVH-accelerated implementation can render a modified version of the _Ray Tracing In One
+Weekend_ cover scene with ~32,000 spheres, 16 ray bounces per pixel, and a resolution of 2048x1536
+on a 2022 _Apple M1 Max_ in 15 milliseconds. The same renderer performs very poorly on a 2019 _Intel
+UHD Graphics 630_ which takes more than 200ms.
+
+GPU APIs
+------------------------------------
+Interfacing with a GPU and writing programs for it typically requires the use of a special API. This
+interface depends on your operating system and GPU vendor. You often have various options depending
+on the capabilities you want. For example, an application that wants to get the most juice out of a
+NVIDIA GPU for general purpose computations may choose to target CUDA, while a developer who prefers
+broad hardware compatibility for a graphical mobile game may choose OpenGL ES or Vulkan. Direct3D
+(D3D) is the main graphics API on Microsoft platforms while Metal is the preferred framework on
+systems from Apple. Vulkan, D3D12, and Metal even support an API specifically to accelerate ray
+tracing.
+
+You can implement this book using any API or framework that you prefer, though I generally assume
+that you are working with a graphics API. In my examples I use [WebGPU][webgpu] which I think maps
+well to all modern graphics APIs like Metal, Vulkan, and D3D12. The code examples should be easy to
+adapt to those libraries. I avoided using ray tracing APIs (such as [DXR][dxr] or [Vulkan Ray
+Tracing][vkrt]) to show you how to implement similar functionality on your own.
+
+If you're looking to implement this in CUDA, you may also be interested in Roger Allen's
+[blog post][rtiow-cuda] titled _Accelerated Ray Tracing in One Weekend in CUDA_.
+
+
+[Arman Uguray]:       https://github.com/armansito
+[Steve Hollasch]:     https://github.com/hollasch
+[Trevor David Black]: https://github.com/trevordblack
+[RTIOW]:              https://raytracing.github.io/books/RayTracingInOneWeekend.html
+[rt-project]:         https://github.com/RayTracing/
+[discussions]:        https://github.com/RayTracing/gpu-tracing/discussions/
+[dxr]:                https://en.wikipedia.org/wiki/DirectX_Raytracing
+[vkrt]:               https://www.khronos.org/blog/ray-tracing-in-vulkan
+[rtiow-cuda]:         https://developer.nvidia.com/blog/accelerated-ray-tracing-cuda/
+[webgpu]:             https://www.w3.org/TR/webgpu/
+
+<!-- Markdeep: https://casual-effects.com/markdeep/ -->
+<link rel='stylesheet' href='../style/book.css'>
+<style class="fallback">body{visibility:hidden;white-space:pre;font-family:monospace}</style>
+<script src="markdeep.min.js"></script>
+<script src="https://morgan3d.github.io/markdeep/latest/markdeep.min.js"></script>
+<script>window.alreadyProcessedMarkdeep||(document.body.style.visibility="visible")</script>
