@@ -33,10 +33,9 @@ much simpler way and it will make you appreciate both the advantages and the cha
 a GPU-based architecture.
 
 Targeting a GPU requires you to program in a way that is different from how you would typically
-approach a CPU program and taking full advantage of the hardware requires very careful tuning given
+approach a CPU program. Taking full advantage of the hardware requires very careful tuning based on
 its architecture and capabilities. I discuss performance considerations when they matter but I have
-generally avoided optimizations and instead prioritized simplicity. There are endless ways to
-optimize and re-design the code which are left for the reader to explore.
+generally avoided optimizations and instead prioritized simplicity.
 
 With that being said, the code you'll build by the end of this book can achieve high frame rates on
 a decent enough GPU.[^syntax] The performance will highly depend on your GPU but you should
@@ -46,7 +45,7 @@ If you run into any problems with your implementation, have general questions or
 would like to share own ideas or work, check out [the GitHub Discussions forum][discussions].
 
 Finally, I'd like to extend a special thank you to [Steve Hollasch][] and [Trevor David Black][] for
-their guidance and for allowing me to host this book under the [Ray Tracing GitHub
+their guidance and for allowing me to host this book under the [RayTracing GitHub
 project][rt-project].
 
 [^syntax]: A BVH-accelerated implementation can render a modified version of the _Ray Tracing In One
@@ -55,7 +54,7 @@ on a 2022 _Apple M1 Max_ in 15 milliseconds. The same renderer performs very poo
 UHD Graphics 630_ which takes more than 200ms.
 
 GPU APIs
-------------------------------------
+--------
 Interfacing with a GPU and writing programs for it typically requires the use of a special API. This
 interface depends on your operating system and GPU vendor. You often have various options depending
 on the capabilities you want. For example, an application that wants to get the most juice out of a
@@ -66,25 +65,71 @@ systems from Apple. Vulkan, D3D12, and Metal even support an API specifically to
 tracing.
 
 You can implement this book using any API or framework that you prefer, though I generally assume
-that you are working with a graphics API. In my examples I use [WebGPU][webgpu] which I think maps
-well to all modern graphics APIs like Metal, Vulkan, and D3D12. The code examples should be easy to
-adapt to those libraries. I avoided using ray tracing APIs (such as [DXR][dxr] or [Vulkan Ray
-Tracing][vkrt]) to show you how to implement similar functionality on your own.
+that you are working with a graphics API. In my examples I use an API based on [WebGPU][webgpu]
+which I think maps well to all modern graphics APIs like Metal, Vulkan, and D3D12. The code
+examples should be easy to adapt to those libraries. I avoided using ray tracing APIs (such as
+[DXR][dxr] or [Vulkan Ray Tracing][vkrt]) to show you how to implement similar functionality on
+your own.
 
+<!-- TODO: Maybe this is better to list in a references section at the bottom -->
 If you're looking to implement this in CUDA, you may also be interested in Roger Allen's
 [blog post][rtiow-cuda] titled _Accelerated Ray Tracing in One Weekend in CUDA_.
 
+Example Code
+------------
+Like _Ray Tracing In One Weekend_, you'll find code examples throughout the book. I use [Rust][] as
+the driving language but you can choose any language that supports your GPU API of choice. I avoid
+most esoteric aspects of Rust to keep the code easily understandable to a large audience. On the few
+occasions where I had to resort to a potentially unfamiliar Rust-ism, I provide a C example to add
+clarity.
+
+I provide the finished source code for this book on [GitHub][gt-project] as a reference but I
+encourage you to type in your own code. I decided to also provide a minimal source template that you
+can use as a starting point if you want to follow along in Rust. The template provides a small
+amount of setup code for the windowing logic to help get you started.
+
+### A note on Rust and Libraries
+
+I chose Rust for this project because of it's ease of use and portability. It also happens to be the
+language that I tend to be most productive in.
+
+An important aspect of Rust is that a lot of common functionality is provided by libraries outside
+its standard library. I tried to avoid external dependencies as much as possible except for the
+following:
+
+* I use [*wgpu*](https://wgpu.rs/) to interact with the GPU. This is a native graphics API based on
+  WebGPU. It's portable and allows the example code to run on Vulkan, Metal, Direct3D 11/12, OpenGL
+  ES 3.1, as well as WebGPU and WebGL via WebAssembly.
+
+  *wgpu* also has [native bindings in other languages](https://github.com/gfx-rs/wgpu-native).
+
+* I use [*winit*](https://docs.rs/winit/latest/winit/) which is a portable windowing library. I use
+  it to view the rendered image in real-time and to make the example code interactive.
+
+* For ease of Rust development I use [*anyhow*](https://docs.rs/anyhow/latest/anyhow/) and
+  [*bytemuck*](https://docs.rs/bytemuck/latest/bytemuck/). *anyhow* is a popular error handling
+  utility and integrates seamlessly. *bytemuck* provides a safe abstraction for the equivalent of
+  `reinterpret_cast` in C++, which normally requires [`unsafe`][rust-unsafe] Rust. I use it to
+  bridge CPU data types with their GPU equivalents.
+
+With all of that out of the way, let's get started!
+
+Drawing an Animated Image
+====================================================================================================
 
 [Arman Uguray]:       https://github.com/armansito
 [Steve Hollasch]:     https://github.com/hollasch
 [Trevor David Black]: https://github.com/trevordblack
 [RTIOW]:              https://raytracing.github.io/books/RayTracingInOneWeekend.html
 [rt-project]:         https://github.com/RayTracing/
+[gt-project]:         https://github.com/RayTracing/gpu-tracing/
 [discussions]:        https://github.com/RayTracing/gpu-tracing/discussions/
 [dxr]:                https://en.wikipedia.org/wiki/DirectX_Raytracing
 [vkrt]:               https://www.khronos.org/blog/ray-tracing-in-vulkan
 [rtiow-cuda]:         https://developer.nvidia.com/blog/accelerated-ray-tracing-cuda/
 [webgpu]:             https://www.w3.org/TR/webgpu/
+[Rust]:               https://www.rust-lang.org/
+[rust-unsafe]:        https://doc.rust-lang.org/book/ch19-01-unsafe-rust.html
 
 <!-- Markdeep: https://casual-effects.com/markdeep/ -->
 <link rel='stylesheet' href='../style/book.css'>
