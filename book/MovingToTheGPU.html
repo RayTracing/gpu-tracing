@@ -88,7 +88,7 @@ encourage you to type in your own code. I decided to also provide a minimal sour
 can use as a starting point if you want to follow along in Rust. The template provides a small
 amount of setup code for the windowing logic to help get you started.
 
-### A note on Rust and Libraries
+### A note on Rust, Libraries, and APIs
 
 I chose Rust for this project because of it's ease of use and portability. It also happens to be the
 language that I tend to be most productive in.
@@ -97,11 +97,11 @@ An important aspect of Rust is that a lot of common functionality is provided by
 its standard library. I tried to avoid external dependencies as much as possible except for the
 following:
 
-* I use [*wgpu*](https://wgpu.rs/) to interact with the GPU. This is a native graphics API based on
+* I use *[wgpu][]* to interact with the GPU. This is a native graphics API based on
   WebGPU. It's portable and allows the example code to run on Vulkan, Metal, Direct3D 11/12, OpenGL
   ES 3.1, as well as WebGPU and WebGL via WebAssembly.
 
-  *wgpu* also has [native bindings in other languages](https://github.com/gfx-rs/wgpu-native).
+  wgpu also has [native bindings in other languages](https://github.com/gfx-rs/wgpu-native).
 
 * I use [*winit*](https://docs.rs/winit/latest/winit/) which is a portable windowing library. I use
   it to view the rendered image in real-time and to make the example code interactive.
@@ -112,10 +112,34 @@ following:
   `reinterpret_cast` in C++, which normally requires [`unsafe`][rust-unsafe] Rust. I use it to
   bridge CPU data types with their GPU equivalents.
 
+[wgpu][] is the most important dependency as it defines how the example code  interacts with the
+GPU. Every GPU API is different but their abstractions for the general concepts used in this book
+are very similar. I will highlight these differences occasionally when they matter.
+
+A large portion of the example code runs on the GPU. Every graphics API defines a programming
+language -- a so called **shading language** -- for authoring GPU programs. wgpu is based on WebGPU,
+as such my GPU code examples are written in the *WebGPU Shading Language* (WGSL)[^syntax].
+<!-- Have GLSL examples too? -->
+
+The [wgpu API documentation](https://docs.rs/wgpu/latest/wgpu/) and the
+[WebGPU](https://www.w3.org/TR/webgpu/) and [WGSL](https://www.w3.org/TR/WGSL/) specifications are
+great references to keep handy when you're
+developing.
+
 With all of that out of the way, let's get started!
+
+[^syntax]: wgpu also supports shaders in the
+[SPIR-V](https://registry.khronos.org/SPIR-V/specs/unified1/SPIRV.html) binary format. You could
+in theory write your shaders in a shading language that can compile to SPIR-V (such as OpenGL's GLSL
+and Direct3D's HLSL) as long as you avoid any language features that can't be expressed in WGSL.
+
+Windowing and GPU Setup
+====================================================================================================
+TODO
 
 Drawing an Animated Image
 ====================================================================================================
+TODO
 
 [Arman Uguray]:       https://github.com/armansito
 [Steve Hollasch]:     https://github.com/hollasch
@@ -130,6 +154,7 @@ Drawing an Animated Image
 [webgpu]:             https://www.w3.org/TR/webgpu/
 [Rust]:               https://www.rust-lang.org/
 [rust-unsafe]:        https://doc.rust-lang.org/book/ch19-01-unsafe-rust.html
+[wgpu]:               https://wgpu.rs
 
 <!-- Markdeep: https://casual-effects.com/markdeep/ -->
 <link rel='stylesheet' href='../style/book.css'>
