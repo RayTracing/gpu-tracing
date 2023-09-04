@@ -112,9 +112,12 @@ following:
   `reinterpret_cast` in C++, which normally requires [`unsafe`][rust-unsafe] Rust. I use it to
   bridge CPU data types with their GPU equivalents.
 
+* Lastly, I use [*pollster*](https://docs.rs/pollster/latest/pollster/) to execute asynchronous
+  wgpu API functions (which is only called from a single line).
+
 [wgpu][] is the most important dependency as it defines how the example code  interacts with the
 GPU. Every GPU API is different but their abstractions for the general concepts used in this book
-are very similar. I will highlight these differences occasionally when they matter.
+are fairly similar. I will highlight these differences occasionally where they matter.
 
 A large portion of the example code runs on the GPU. Every graphics API defines a programming
 language -- a so called **shading language** -- for authoring GPU programs. wgpu is based on WebGPU,
@@ -135,9 +138,92 @@ and Direct3D's HLSL) as long as you avoid any language features that can't be ex
 
 Windowing and GPU Setup
 ====================================================================================================
-TODO
+The first thing to decide is how you want to view your image. One option is to write the output from
+the GPU to a file. I think a more fun option is to display the image inside an application window.
+I prefer this approach because it allows you to see your rendering as it resolves over time and it
+will allow you to make your application interactive later on. The downside is that it requires a
+little bit of wiring.
 
-Drawing an Animated Image
+First, your program needs a way to interact with your operating system to create and manage a
+window. Next, you need a way to coordinate your GPU workloads to output a sequence of images at the
+right time for your OS to be able to composite it inside the window and send it to your display.
+
+Every operating system with a graphical UI provides a native *windowing API* for this purpose.
+Graphics APIs typically define some way to integrate with a windowing system. You'll have various
+libraries to choose from depending on your OS and programming language. You mainly need to make sure
+that the windowing API or UI toolkit you choose can integrate with your graphics API.
+
+In my examples I use *winit* which is a Rust framework that integrates smoothly with wgpu. I put
+together a [project template][gt-template] that sets up the library boilerplate for the window
+handling, which you're free to use as a starting point. It's not that much code, so I'll briefly go
+over the important pieces.
+
+The Event Loop
+--------------
+The first thing the template does is create a window and associate it with an *event loop*. The OS
+sends a message to the application during important "events" that the application should act on,
+such as a mouse click or when the window gets resized. Your application can wait for these events
+and handle them as they arrive by looping indefinitely:
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    use {
+        anyhow::{Context, Result},
+        winit::{
+            event::{Event, WindowEvent},
+            event_loop::{ControlFlow, EventLoop},
+            window::WindowBuilder,
+        },
+    };
+
+    const WIDTH: u32 = 800;
+    const HEIGHT: u32 = 600;
+
+    fn main() -> Result<()> {
+        let event_loop = EventLoop::new();
+        let window_size = winit::dpi::LogicalSize::new(WIDTH, HEIGHT);
+        let window = WindowBuilder::new()
+            .with_inner_size(window_size)
+            .with_title("GPU Path Tracer".to_string())
+            .build(&event_loop)?;
+
+        event_loop.run(move |event, _, control_flow| {
+            *control_flow = ControlFlow::Poll;
+            match event {
+                Event::WindowEvent { event, .. } => match event {
+                    WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
+                    _ => (),
+                }
+                Event::RedrawRequested(_) => {
+                    // TODO: draw frame
+                }
+                Event::MainEventsCleared => {
+                    // draw repeatedly
+                    window.request_redraw();
+                }
+                _ => ()
+            }
+        });
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [main-initial]: <kbd>[main.rs]</kbd> Creating a window and handling window events]
+
+This code creates a window titled "GPU Path Tracer" and kicks off an event loop.
+`event_loop.run()` internally waits for window events and notifies your application by calling the
+lambda function that it gets passed as an argument.
+
+The lambda function only handles a few events for now. The most important one is `RedrawRequested`
+which is the signal to render and present a new frame. `MainEventsCleared` is simply an event that
+gets sent when all pending events have been processed. We call `window.request_redraw()` to draw
+repeatedly -- this triggers a new `RedrawRequested` event which is followed by another
+`MainEventsCleared`, which requests a redraw,  and so on until someone closes the window.
+
+Running this code should bring up an empty window. It may look like this:
+
+  ![Figure [empty-window]: Empty Window](../images/img-1-empty-window.png)
+
+
+Drawing an Image
 ====================================================================================================
 TODO
 
@@ -147,6 +233,7 @@ TODO
 [RTIOW]:              https://raytracing.github.io/books/RayTracingInOneWeekend.html
 [rt-project]:         https://github.com/RayTracing/
 [gt-project]:         https://github.com/RayTracing/gpu-tracing/
+[gt-template]:        https://github.com/RayTracing/gpu-tracing/blob/dev/code/template
 [discussions]:        https://github.com/RayTracing/gpu-tracing/discussions/
 [dxr]:                https://en.wikipedia.org/wiki/DirectX_Raytracing
 [vkrt]:               https://www.khronos.org/blog/ray-tracing-in-vulkan
