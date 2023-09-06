@@ -155,8 +155,11 @@ that the windowing API or UI toolkit you choose can integrate with your graphics
 
 In my examples I use *winit* which is a Rust framework that integrates smoothly with wgpu. I put
 together a [project template][gt-template] that sets up the library boilerplate for the window
-handling, which you're free to use as a starting point. It's not that much code, so I'll briefly go
-over the important pieces.
+handling. You're welcome to use it as a starting point.
+
+The setup code isn't a lot, so I'll briefly go over the important pieces in this chapter. The
+details here aren't all that important so feel free to copy the template and skip ahead to chapter
+2.
 
 The Event Loop
 --------------
@@ -186,6 +189,8 @@ and handle them as they arrive by looping indefinitely:
             .with_inner_size(window_size)
             .with_title("GPU Path Tracer".to_string())
             .build(&event_loop)?;
+
+        // TODO: initialize renderer
 
         event_loop.run(move |event, _, control_flow| {
             *control_flow = ControlFlow::Poll;
@@ -218,10 +223,174 @@ gets sent when all pending events have been processed. We call `window.request_r
 repeatedly -- this triggers a new `RedrawRequested` event which is followed by another
 `MainEventsCleared`, which requests a redraw,  and so on until someone closes the window.
 
-Running this code should bring up an empty window. It may look like this:
+Running this code should bring up an empty window like this:
 
   ![Figure [empty-window]: Empty Window](../images/img-1-empty-window.png)
 
+GPU and Surface Initialization
+------------------------------
+The next thing the template does is establish a connection to the GPU and configure a surface. The
+surface manages a set of *textures* that allow the GPU to render inside the window.
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    async fn connect_to_gpu(window: &Window) -> Result<(wgpu::Device, wgpu::Queue, wgpu::Surface)> {
+        use wgpu::TextureFormat::{Bgra8Unorm, Rgba8Unorm};
+        // Create an "instance" of wgpu. This is the entry-point to the API.
+        let instance = wgpu::Instance::default();
+
+        // Create a drawable "surface" that is associated with the window.
+        let surface = unsafe { instance.create_surface(&window) }?;
+
+        // Request a GPU that is compatible with the surface. If the system has multiple GPUs then
+        // pick the high performance one.
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                force_fallback_adapter: false,
+                compatible_surface: Some(&surface),
+            })
+            .await
+            .context("failed to find a compatible adapter")?;
+
+        // Connect to the GPU. "device" represents the connection to the GPU and allows us to create
+        // resources like buffers, textures, and pipelines. "queue" represents the command queue that
+        // we use to submit commands to the GPU.
+        let (device, queue) = adapter
+            .request_device(&wgpu::DeviceDescriptor::default(), None)
+            .await
+            .context("failed to connect to the GPU")?;
+
+        // Configure the texture memory backs the surface. Our renderer will draw to a surface texture
+        // every frame.
+        let caps = surface.get_capabilities(&adapter);
+        let format = caps
+            .formats
+            .into_iter()
+            .find(|it| matches!(it, Rgba8Unorm | Bgra8Unorm))
+            .context("could not find preferred texture format (Rgba8Unorm or Bgra8Unorm)")?;
+        let size = window.inner_size();
+        let config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format,
+            width: size.width,
+            height: size.height,
+            present_mode: wgpu::PresentMode::AutoVsync,
+            alpha_mode: caps.alpha_modes[0],
+            view_formats: vec![],
+        };
+        surface.configure(&device, &config);
+
+        Ok((device, queue, surface))
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [main-initial]: <kbd>[main.rs]</kbd> The connect_to_gpu function]
+
+The code that sets this all up is a bit wordy. I'll quickly go over the important bits:
+
+1. What the first ~20 lines do is request a connection to a GPU that is compatible with the
+   window. The bit about `wgpu::PowerPreference::HighPerformance` is a hint to the API that we want
+   the higher-powered GPU if the current system has more than one available.
+
+2. The rest of the function configures the dimensions, pixel format, and presentation mode of the
+   surface. `Rgba8Unorm` and `Bgra8Unorm` are common pixel formats that store each color component
+   (red, green, blue, and alpha) as an 8-bit unsigned integer. The "unorm" part stands for "unsigned
+   normalized", which means that our rendering code can represent the component values as a real
+   number in the range `[0.0, 1.0]`. We set the size to simply span the entire window.
+
+   The bit about `wgpu::PresentMode::AutoVsync` tells the surface to synchronize the presentation of
+   each frame with the display's refresh rate. The surface will manage an internal queue of textures
+   for us and we will render to them as they become available. This prevents a visual artifact known
+   as "tearing" (which can happen when frames get presented faster than the display refresh rate) by
+   setting up the renderer to be *v-sync locked*. We will discuss some of the implications of this
+   later on.
+
+   The last bit that I'll highlight here is `wgpu::TextureUsage::RENDER_ATTACHMENT`. This just
+   indicates that we are going to use the GPU's rendering function to draw directly into the surface
+   textures.
+
+After setting all this up the function returns 3 objects: A `wgpu::Device` that represents the
+connection to the GPU, a `wgpu::Queue` which we'll use to issue commands to the GPU, and a
+`wgpu::Surface` that we'll use to present frames to the window. We will talk a lot about the first
+two when we start putting together our renderer in the next chapter.
+
+You may have noticed that the function declaration begins with `async`. This marks the function as
+*asynchronous* which means that it doesn't return its result immediately. This is only necessary
+because the API functions that we invoke (`wgpu::Instance::request_adapter` and
+`wgpu::Adapter::request_device`) are asynchronous functions. The `.await` keyword is syntactic sugar
+that makes the asynchronous calls appear like regular (synchronous) function calls. What happens
+under the hood is somewhat complex but I wouldn't worry about this too much since this is the one
+and only bit of asynchronous code that we will encounter. If you want to learn more about it, I
+recommend checking out the [Rust Async Book](https://rust-lang.github.io/async-book/).
+
+### Putting it all together
+
+Finally, the `main` function needs a couple updates: first we make it `async` so that it we can
+"await" on `connect_to_gpu`. Technically the `main` function of a program cannot be async and
+running an async function requires some additional utilities. There are various alternatives but I
+chose to use a library called `pollster`. The library provides a special macro (called `main`) that
+takes care of everything. Again, this is the only asynchronous code that we'll encounter so don't
+worry about what it does.
+
+The second change to the main function is where it handles the `RedrawRequested` event. For every
+new frame, we first request the next available texture from the surface that we just created. The
+queue has a limited number of textures available. If the CPU outpaces the GPU (i.e. the GPU takes
+longer than a display refresh cycle to finish its tasks), then calling
+`surface.get_current_texture()` can block until a texture becomes available.
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+    #[pollster::main]
+    async fn main() -> Result<()> {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+        let event_loop = EventLoop::new();
+        let window_size = winit::dpi::LogicalSize::new(WIDTH, HEIGHT);
+        let window = WindowBuilder::new()
+            .with_inner_size(window_size)
+            .with_title("GPU Path Tracer".to_string())
+            .build(&event_loop)?;
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        let (device, queue, surface) = connect_to_gpu(&window).await?;
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+        // TODO: initialize renderer
+
+        event_loop.run(move |event, _, control_flow| {
+            *control_flow = ControlFlow::Poll;
+            match event {
+                Event::WindowEvent { event, .. } => match event {
+                    WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
+                    _ => (),
+                }
+                Event::RedrawRequested(_) => {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+                    // Wait for the next available frame buffer.
+                    let frame: wgpu::SurfaceTexture = surface
+                        .get_current_texture()
+                        .expect("failed to get current texture");
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+                    // TODO: draw frame
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+
+                    frame.present();
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+                }
+                Event::MainEventsCleared => {
+                    // draw repeatedly
+                    window.request_redraw();
+                }
+                _ => ()
+            }
+        });
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [main-setup-complete]: <kbd>[main.rs]</kbd> Putting together the initial main function]
+
+That was a lot of boilerplate, which is unavoidable when you want to build a real-time system that
+interacts with OS resources and distributes its logic across multiple processors (a CPU and a GPU in
+our case). Luckily, this is enough for us to start building our real-time renderer.
 
 Drawing an Image
 ====================================================================================================
