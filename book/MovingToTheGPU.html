@@ -182,7 +182,7 @@ and handle them as they arrive by looping indefinitely:
     const WIDTH: u32 = 800;
     const HEIGHT: u32 = 600;
 
-    fn main() -> Result<()> {
+    fn main() -> Result&lt()&gt {
         let event_loop = EventLoop::new();
         let window_size = winit::dpi::LogicalSize::new(WIDTH, HEIGHT);
         let window = WindowBuilder::new()
@@ -233,7 +233,7 @@ The next thing the template does is establish a connection to the GPU and config
 surface manages a set of *textures* that allow the GPU to render inside the window.
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
-    async fn connect_to_gpu(window: &Window) -> Result<(wgpu::Device, wgpu::Queue, wgpu::Surface)> {
+    async fn connect_to_gpu(window: &Window) -> Result&lt(wgpu::Device, wgpu::Queue, wgpu::Surface&gt {
         use wgpu::TextureFormat::{Bgra8Unorm, Rgba8Unorm};
         // Create an "instance" of wgpu. This is the entry-point to the API.
         let instance = wgpu::Instance::default();
@@ -322,7 +322,7 @@ under the hood is somewhat complex but I wouldn't worry about this too much sinc
 and only bit of asynchronous code that we will encounter. If you want to learn more about it, I
 recommend checking out the [Rust Async Book](https://rust-lang.github.io/async-book/).
 
-### Putting it all together
+### Completing Setup
 
 Finally, the `main` function needs a couple updates: first we make it `async` so that it we can
 "await" on `connect_to_gpu`. Technically the `main` function of a program cannot be async and
@@ -339,7 +339,7 @@ longer than a display refresh cycle to finish its tasks), then calling
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
     #[pollster::main]
-    async fn main() -> Result<()> {
+    async fn main() -> Result&lt()&gt {
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
         let event_loop = EventLoop::new();
         let window_size = winit::dpi::LogicalSize::new(WIDTH, HEIGHT);
@@ -388,9 +388,113 @@ longer than a display refresh cycle to finish its tasks), then calling
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     [Listing [main-setup-complete]: <kbd>[main.rs]</kbd> Putting together the initial main function]
 
-That was a lot of boilerplate, which is unavoidable when you want to build a real-time system that
-interacts with OS resources and distributes its logic across multiple processors (a CPU and a GPU in
-our case). Luckily, this is enough for us to start building our real-time renderer.
+That was a lot of boilerplate -- this is sometimes necessary to interact with OS resources. With all
+of this in place, we can start building a real-time renderer.
+
+### A note on error handling in Rust
+If you're new to Rust, some of the patterns above may look unfamiliar. One of these is error
+handling using the `Result` type. I use this pattern frequently enough that it's worth a quick
+explainer.
+
+A `Result` is a variant type that can hold either a success (`Ok`) value or an error (`Err`) value.
+The types of the `Ok` and `Err` variants are generic:
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    pub enum Result&ltT, E&gt {
+        Ok(T),
+        Err(E),
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Figure [rust-result]: The `Result` type]
+
+`T` and `E` can be any type. It's common for a library to define its own error types to represent
+various error conditions.
+
+The idea is that a function returns a `Result` if it has a failure mode. A caller must check the
+status of the `Result` to unpack the return value or recover from an error.
+
+In a C program, a common way to handle an error is to return early from the calling function and
+and perhaps return an entirely new error. For example:
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ C
+    bool function_with_a_result(Foo* out_result);
+
+    int main() {
+        Foo foo;
+        if (!function_with_result(&foo)) {
+            return -1;
+        }
+
+        // ...do something with `foo`...
+
+        return 0;
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Rust provides the `?` operator to automatically unpack a `Result` and return early if it holds an
+error. A Rust version of the C program above could be written like this:
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    fn function_with_result() -> Result&ltFoo, FooError&gt {...}
+
+    fn caller() -> Result&lt(), FooError&gt {
+        let foo: Foo = function_with_result()?;
+
+        // ...do something with `foo`...
+
+        Ok(())
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+If `function_with_result()` returns an error, the `?` operator will cause `caller` to return and
+propagate the error value. This works as long as `caller` and `function_with_result` either return
+the same error type or types with a known conversion. There are various other ways to handle an
+error:
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    fn function_with_result() -> Result&ltFoo, FooError&gt {...}
+
+    fn caller() -> Result&lt(), BarError&gt {
+        ...
+        if let Err(e) = function_with_result() {
+            println!("got a foo error: {:?}", e);
+            return Err(BarError::from_foo(e));
+        }
+        ...
+        let foo = function_with_result().map_err(BarError::from_foo)?;
+        ...
+        let Ok(foo) = function_with_result() else {
+            panic!("Didn't work the second time");
+        }
+        ...
+        let foo = match function_with_result() {
+            Ok(foo) => foo,
+            Err(e) => panic!("failed again");
+        };
+        ...
+        Ok(())
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+I like to keep things simple in my code examples and use the `?` operator. Instead of defining
+custom error types and conversions, I use a catch all `Error` type from a library called *anyhow*.
+You'll often see the examples include `anyhow::Result` (an alias for `Result&ltT, anyhow::Error&gt`)
+and `anyhow::Context`. The latter is useful for adding an error message while converting an error
+type to an `anyhow::Error`:
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    fn caller() -> anyhow::Result&lt()&gt {
+        let foo: Foo = function_with_result().context("failed to get foo")?;
+
+        // ...do something with `foo`...
+
+        Ok(())
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+You can read more about the `Result` type in [its module
+documentation](https://doc.rust-lang.org/std/result/index.html).
+
 
 Drawing an Image
 ====================================================================================================
