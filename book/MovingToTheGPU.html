@@ -157,9 +157,7 @@ In my examples I use *winit* which is a Rust framework that integrates smoothly 
 together a [project template][gt-template] that sets up the library boilerplate for the window
 handling. You're welcome to use it as a starting point.
 
-The setup code isn't a lot, so I'll briefly go over the important pieces in this chapter. The
-details here aren't all that important so feel free to copy the template and skip ahead to chapter
-2.
+The setup code isn't a lot, so I'll briefly go over the important pieces in this chapter.
 
 The Event Loop
 --------------
@@ -388,6 +386,9 @@ longer than a display refresh cycle to finish its tasks), then calling
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     [Listing [main-setup-complete]: <kbd>[main.rs]</kbd> Putting together the initial main function]
 
+Once a frame texture becomes available, the example issues a request to display it as soon as
+possible by calling `frame.present()`. All of our rendering work will be scheduled before this call.
+
 That was a lot of boilerplate -- this is sometimes necessary to interact with OS resources. With all
 of this in place, we can start building a real-time renderer.
 
@@ -479,8 +480,8 @@ error:
 I like to keep things simple in my code examples and use the `?` operator. Instead of defining
 custom error types and conversions, I use a catch all `Error` type from a library called *anyhow*.
 You'll often see the examples include `anyhow::Result` (an alias for `Result&ltT, anyhow::Error&gt`)
-and `anyhow::Context`. The latter is useful for adding an error message while converting an error
-type to an `anyhow::Error`:
+and `anyhow::Context`. The latter is useful for adding an error message while converting to an
+`anyhow::Error`:
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
     fn caller() -> anyhow::Result&lt()&gt {
@@ -496,9 +497,45 @@ You can read more about the `Result` type in [its module
 documentation](https://doc.rust-lang.org/std/result/index.html).
 
 
-Drawing an Image
+Drawing Pixels
 ====================================================================================================
-TODO
+At this stage, we have code that brings up a window, connects to the GPU, and sets up a queue of
+textures (also known as a *swap chain*) that is synchronized with the display. In Computer
+Graphics, the term "texture" is generally used in the context of *texture mapping*, which is a
+technique to apply detail to geometry using data stored in memory. A very common application is to
+map (in the mathematical sense) color data from the pixels of a 2D image onto the surface of a 3D
+polygon.
+
+Texture mapping is so essential to real-time graphics that all modern GPUs are equipped with
+specialized hardware to speed up texture operations. It's not uncommon for a modern video game to
+use texture assets (for meterials, colors, surface normals, etc) that take up hundreds of megabytes.
+Memory access is often the performance bottleneck for a GPU, so GPUs provide features like dedicated
+texture memory caches, sampling hardware, and compression -- all geared towards increasing texture
+data throughput.
+
+The hardware texture features are useful for any type of data that follows similar memory access
+patterns and they don't have to be used strictly for texture mapping. The surface textures in the
+code are such an example because we are going to use them to store and display the output of the
+renderer[^syntax].
+
+In wgpu (as well as all the other APIs that it is compatible with) a *texture object* represents
+texture memory that can be used in three main ways: texture mapping, shader storage, and the target
+of a *render pass*[^^syntax]. A surface texture is special because wgpu allows a surface texture to
+be used only as a render target.
+
+Not all native APIs have this restriction. For instance, both Metal and Vulkan allow their version
+of a surface texture -- a *frame buffer* (Metal) or *swap chain* (Vulkan) texture -- to be
+configured for other usages. This sometimes comes with a warning about impaired performance and is
+not guaranteed to be supported by the hardware.
+
+wgpu doesn't provide any other option so I'm going to start by implementing a render pass. This is
+an essential and very widely used function of the GPU, so it's worth learning about.
+
+
+[^syntax]: *Technically, we are mapping a 2D grid of pixels that is stored in memory to another
+region of memory that shows up on the screen, so one could say this is still texture mapping.
+
+[^^syntax]: See [`wgpu::TextureUsages`](https://docs.rs/wgpu/0.17.0/wgpu/struct.TextureUsages.html).
 
 [Arman Uguray]:       https://github.com/armansito
 [Steve Hollasch]:     https://github.com/hollasch
