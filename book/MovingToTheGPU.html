@@ -38,7 +38,7 @@ its architecture and capabilities. I discuss performance considerations when the
 generally avoided optimizations and instead prioritized simplicity.
 
 With that being said, the code you'll build by the end of this book can achieve high frame rates on
-a decent enough GPU.[^syntax] The performance will highly depend on your GPU but you should
+a decent enough GPU.[^ch1] The performance will highly depend on your GPU but you should
 generally be able to achieve near-interactive rates with a small amount of tuning.
 
 If you run into any problems with your implementation, have general questions or corrections, or
@@ -48,7 +48,7 @@ Finally, I'd like to extend a special thank you to [Steve Hollasch][] and [Trevo
 their guidance and for allowing me to host this book under the [RayTracing GitHub
 project][rt-project].
 
-[^syntax]: A BVH-accelerated implementation can render a modified version of the _Ray Tracing In One
+[^ch1]: A BVH-accelerated implementation can render a modified version of the _Ray Tracing In One
 Weekend_ cover scene with ~32,000 spheres, 16 ray bounces per pixel, and a resolution of 2048x1536
 on a 2022 _Apple M1 Max_ in 15 milliseconds. The same renderer performs very poorly on a 2019 _Intel
 UHD Graphics 630_ which takes more than 200ms.
@@ -121,7 +121,7 @@ are fairly similar. I will highlight these differences occasionally where they m
 
 A large portion of the example code runs on the GPU. Every graphics API defines a programming
 language -- a so called **shading language** -- for authoring GPU programs. wgpu is based on WebGPU,
-as such my GPU code examples are written in the *WebGPU Shading Language* (WGSL)[^syntax].
+as such my GPU code examples are written in the *WebGPU Shading Language* (WGSL)[^ch1.2.1].
 <!-- Have GLSL examples too? -->
 
 The [wgpu API documentation](https://docs.rs/wgpu/latest/wgpu/) and the
@@ -131,7 +131,7 @@ developing.
 
 With all of that out of the way, let's get started!
 
-[^syntax]: wgpu also supports shaders in the
+[^ch1.2.1]: wgpu also supports shaders in the
 [SPIR-V](https://registry.khronos.org/SPIR-V/specs/unified1/SPIRV.html) binary format. You could
 in theory write your shaders in a shading language that can compile to SPIR-V (such as OpenGL's GLSL
 and Direct3D's HLSL) as long as you avoid any language features that can't be expressed in WGSL.
@@ -516,11 +516,11 @@ data throughput.
 The hardware texture features are useful for any type of data that follows similar memory access
 patterns and they don't have to be used strictly for texture mapping. The surface textures in the
 code are such an example because we are going to use them to store and display the output of the
-renderer[^syntax].
+renderer[^ch3-cit1].
 
 In wgpu (as well as all the other APIs that it is compatible with) a *texture object* represents
 texture memory that can be used in three main ways: texture mapping, shader storage, and the target
-of a *render pass*[^^syntax]. A surface texture is special because wgpu allows a surface texture to
+of a *render pass*[^ch3-cit2]. A surface texture is special because wgpu allows a surface texture to
 be used only as a render target.
 
 Not all native APIs have this restriction. For instance, both Metal and Vulkan allow their version
@@ -529,13 +529,171 @@ configured for other usages. This sometimes comes with a warning about impaired 
 not guaranteed to be supported by the hardware.
 
 wgpu doesn't provide any other option so I'm going to start by implementing a render pass. This is
-an essential and very widely used function of the GPU, so it's worth learning about.
+a fundamental and very widely used function of the GPU, so it's worth learning about.
 
 
-[^syntax]: *Technically, we are mapping a 2D grid of pixels that is stored in memory to another
+[^ch3-cit1]: *Technically, we are mapping a 2D grid of pixels that is stored in memory to another
 region of memory that shows up on the screen, so one could say this is still texture mapping.
 
-[^^syntax]: See [`wgpu::TextureUsages`](https://docs.rs/wgpu/0.17.0/wgpu/struct.TextureUsages.html).
+[^ch3-cit2]: See [`wgpu::TextureUsages`](https://docs.rs/wgpu/0.17.0/wgpu/struct.TextureUsages.html).
+
+The `render` module
+---------------------
+I like to separate the rendering code from all the windowing code, so I'll start by creating a file
+named `render.rs`. Every Rust file defines a module with the same name and acts as a namespace
+for all functions and types that are declared in it. I'll add a data structure called `PathTracer`.
+This will hold all GPU resources and eventually implement our path tracing algorithm:
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    pub struct PathTracer {
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+    }
+
+    impl PathTracer {
+        pub fn new(device: wgpu::Device, queue: wgpu::Queue) -> PathTracer {
+            device.on_uncaptured_error(Box::new(|error| {
+                panic!("Aborting due to an error: {}", error);
+            }));
+
+            // TODO: initialize GPU resources
+
+            PathTracer {
+                device,
+                queue,
+            }
+        }
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [render-initial]: <kbd>[render.rs]</kbd> The PathTracer structure]
+
+We start out with an associated function called `PathTracer::new` which will initialize all GPU
+resources. The `PathTracer` takes ownership of the `wgpu::Device` and `wgpu::Queue` that we created
+earlier and it will hold on to them for the rest of the application's life.
+
+`wgpu::Device` represents a connection to the GPU. It is responsible for creating resources like
+texture, buffer, and pipeline objects. It also defines some methods for error handling.
+
+The first thing I do is set up an "uncaptured error" handler. If you look at the [declarations
+](https://docs.rs/wgpu/0.17.0/wgpu/struct.Device.html) of resource creation methods you'll notice
+that none of them return a `Result`. This doesn't mean that they always succeed, as a matter of fact
+all of these operations can fail. This is because wgpu closely mirrors the WebGPU API which uses a
+concept called *error scopes* to detect and respond to errors.
+
+Whenever there's an error that I don't handle using an error scope it will trigger the uncaptured
+error handler, which will print out an error message and abort the program[^ch3.1-cit1]. For now,
+I won't set up any error scopes in `PathTracer::new` and I'll abort the program if the API fails to
+create the initial resources.
+
+Next, let's declare the `render` module and initialize a `PathTracer` in the `main` function:
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+        ...
+    };
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Rust highlight
+
+    mod render;
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    const WIDTH: u32 = 800;
+    const HEIGHT: u32 = 600;
+
+    #[pollster::main]
+    async fn main() -> Result<()> {
+        let event_loop = EventLoop::new();
+        let window_size = winit::dpi::LogicalSize::new(WIDTH, HEIGHT);
+        let window = WindowBuilder::new()
+            .with_inner_size(window_size)
+            .with_resizable(false)
+            .with_title("GPU Path Tracer".to_string())
+            .build(&event_loop)?;
+
+        let (device, queue, surface) = connect_to_gpu(&window).await?;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Rust highlight
+        let renderer = render::PathTracer::new(device, queue);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+
+        event_loop.run(move |event, _, control_flow| {
+            *control_flow = ControlFlow::Poll;
+            match event {
+                Event::WindowEvent { event, .. } => match event {
+                    WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
+                    _ => (),
+                },
+                Event::RedrawRequested(_) => {
+                    // Wait for the next available frame buffer.
+                    let frame: wgpu::SurfaceTexture = surface
+                        .get_current_texture()
+                        .expect("failed to get current texture");
+
+                    // TODO: draw frame
+
+                    frame.present();
+                }
+                Event::MainEventsCleared => {
+                    // draw repeatedly
+                    window.request_redraw();
+                }
+                _ => (),
+            }
+        });
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [main-renderer-init]: <kbd>[main.rs]</kbd> Initializing a Renderer]
+
+Now that we have the skeleton in place, it's time to initialize the first resource that will allow
+us to execute code on the GPU.
+
+[^ch3.1-cit1]: This is actually the default behavior so I didn't really need to call
+`on_uncaptured_error`.
+
+The render pipeline
+-------------------
+An important component of the GPU is the *hardware rasterizer*. This is a specialized piece of
+hardware tasked with computing the set of pixels covered by a set of geometric primitives. The
+hardware rasterizer is blazingly fast and it lies at the heart of the so called *graphics* or
+*render pipeline*.
+
+The main idea is to define the scene (either 3D or 2D) in terms of polygonal meshes, typically made
+of surfaces that are composed of triangles. The hardware rasterizer turns a stream of polygon
+coordinates into pixels that can be painted (or *shaded*). The hardware rasterizer itself is *fixed
+function* -- meaning that it cannot be directly programmed -- and it's used in combination with
+several other "pipeline stages". Two of these stages are programmable on practically all modern
+GPUs: the *vertex* and *fragment processor*.
+
+The *vertex* stage allows the programmer to dynamically compute data associated with the vertices
+of the input mesh. The primary output of this stage are the positions of all vertices relative to
+the rendered image. The output doesn't need to be limited to just the position and will often
+contain data such as a surface normal or a texture coordinate to be used during shading. The vertex
+stage prepares the input to the hardware rasterizer.
+
+The *fragment* stage runs after the hardware rasterizer has converted each primitive into a pixel
+fragment. One way to think about a fragment is as the visible portion of a primitive (e.g. a
+triangle) covering a region within an individual pixel. The main output of this stage are the
+colors that each primitive contributes to the pixels that it covers. The color computations in a
+fragment shader can get very sophisticated and can involve techniques such as texture mapping or
+tracing rays. Once all primitives have been processed, the resulting color for each pixel gets
+written to the texture designated as the *render target*.
+
+<!-- TODO: Figure showing triangle rasterization -->
+
+The point of these programmable stages is that the GPU defines a programming model in which the same 
+logic runs over smaller parts of a large data set in parallel. As an example, imagine that you
+want to simulate the ocean surface. You want to animate waves and paint the surface to look
+realistic with accurate reflections of the sky and the sun. Say, you decide to model the ocean
+surface as a triangle mesh. To determine the final position of each vertex, you evaluate a
+complicated wave function which involves lots of trigonometry. Then for each pixel that the mesh
+covers, you want to compute the color of the water surface using texture lookups and lighting.
+
+Suppose that your ocean surface mesh has 30,000 vertices and the resolution of your render
+target is 1080p, which has around 2,000,000 pixels. Let's say the ocean covers half of the frame,
+so you need to process 30,000 vertex and 1,000,000 fragment computations. To achieve a frame rate of
+60 frames per second (or *fps*) you need to render and present a single frame in under 16
+milliseconds. If you were to process each vertex and fragment sequentially in a loop you would
+easily exceed that time budget. A modern AAA video game can have scenes with more than 200,000
+polygons, complex materials with 4K textures, and use algorithms that require several render passes.
+Without the parallelism of a GPU, achieving real-time performance would be virtually impossible.
 
 [Arman Uguray]:       https://github.com/armansito
 [Steve Hollasch]:     https://github.com/hollasch

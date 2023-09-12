@@ -16,6 +16,8 @@ use {
     },
 };
 
+mod render;
+
 const WIDTH: u32 = 800;
 const HEIGHT: u32 = 600;
 
@@ -31,7 +33,7 @@ async fn main() -> Result<()> {
 
     let (device, queue, surface) = connect_to_gpu(&window).await?;
 
-    // TODO: initialize renderer
+    let renderer = render::PathTracer::new(device, queue).await?;
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Poll;
