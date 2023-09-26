@@ -1,4 +1,4 @@
-New Series on Building a GPU Ray Tracer
+Chapters on GPU Ray Tracing
 ====================================================================================================
 
 This repository hosts a new book series that walks you through building your own GPU path tracer. It

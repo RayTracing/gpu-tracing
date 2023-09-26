@@ -33,7 +33,7 @@ async fn main() -> Result<()> {
 
     let (device, queue, surface) = connect_to_gpu(&window).await?;
 
-    let renderer = render::PathTracer::new(device, queue).await?;
+    let renderer = render::PathTracer::new(device, queue);
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Poll;
@@ -48,7 +48,11 @@ async fn main() -> Result<()> {
                     .get_current_texture()
                     .expect("failed to get current texture");
 
-                // TODO: draw frame
+                let render_target = frame
+                    .texture
+                    .create_view(&wgpu::TextureViewDescriptor::default());
+
+                renderer.render_frame(&render_target);
 
                 frame.present();
             }

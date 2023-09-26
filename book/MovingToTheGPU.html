@@ -223,7 +223,7 @@ repeatedly -- this triggers a new `RedrawRequested` event which is followed by a
 
 Running this code should bring up an empty window like this:
 
-  ![Figure [empty-window]: Empty Window](../images/img-1-empty-window.png)
+  ![Figure [empty-window]: Empty Window](../images/img-01-empty-window.png)
 
 GPU and Surface Initialization
 ------------------------------
@@ -500,49 +500,39 @@ documentation](https://doc.rust-lang.org/std/result/index.html).
 Drawing Pixels
 ====================================================================================================
 At this stage, we have code that brings up a window, connects to the GPU, and sets up a queue of
-textures (also known as a *swap chain*) that is synchronized with the display. In Computer
-Graphics, the term "texture" is generally used in the context of *texture mapping*, which is a
-technique to apply detail to geometry using data stored in memory. A very common application is to
-map (in the mathematical sense) color data from the pixels of a 2D image onto the surface of a 3D
-polygon.
+textures that is synchronized with the display. In Computer Graphics, the term "texture" is
+generally used in the context of *texture mapping*, which is a technique to apply detail to geometry
+using data stored in memory. A very common application is to map color data from the pixels of a 2D
+image onto the surface of a 3D polygon.
 
 Texture mapping is so essential to real-time graphics that all modern GPUs are equipped with
 specialized hardware to speed up texture operations. It's not uncommon for a modern video game to
-use texture assets (for meterials, colors, surface normals, etc) that take up hundreds of megabytes.
-Memory access is often the performance bottleneck for a GPU, so GPUs provide features like dedicated
-texture memory caches, sampling hardware, and compression -- all geared towards increasing texture
-data throughput.
+use texture assets that take up hundreds of megabytes. Processing all of that data involves a lot
+of memory traffic which is a big performance bottleneck for a GPU. This is why GPUs come with
+dedicated texture memory caches, sampling hardware, compression schemes and other features to
+improve texture data throughput.
 
-The hardware texture features are useful for any type of data that follows similar memory access
-patterns and they don't have to be used strictly for texture mapping. The surface textures in the
-code are such an example because we are going to use them to store and display the output of the
-renderer[^ch3-cit1].
-
-In wgpu (as well as all the other APIs that it is compatible with) a *texture object* represents
-texture memory that can be used in three main ways: texture mapping, shader storage, and the target
-of a *render pass*[^ch3-cit2]. A surface texture is special because wgpu allows a surface texture to
-be used only as a render target.
+We are going to use the texture hardware to store the output of our renderer. In wgpu, a *texture
+object* represents texture memory that can be used in three main ways: texture mapping, shader
+storage, or as a *render target*[^ch3-cit1]. A surface texture is a special kind of texture that can
+only be used as a render target.
 
 Not all native APIs have this restriction. For instance, both Metal and Vulkan allow their version
 of a surface texture -- a *frame buffer* (Metal) or *swap chain* (Vulkan) texture -- to be
-configured for other usages. This sometimes comes with a warning about impaired performance and is
-not guaranteed to be supported by the hardware.
+configured for other usages, though this sometimes comes with a warning about impaired performance
+and is not guaranteed to be supported by the hardware.
 
 wgpu doesn't provide any other option so I'm going to start by implementing a render pass. This is
 a fundamental and very widely used function of the GPU, so it's worth learning about.
 
+[^ch3-cit1]: See [`wgpu::TextureUsages`](https://docs.rs/wgpu/0.17.0/wgpu/struct.TextureUsages.html).
 
-[^ch3-cit1]: *Technically, we are mapping a 2D grid of pixels that is stored in memory to another
-region of memory that shows up on the screen, so one could say this is still texture mapping.
-
-[^ch3-cit2]: See [`wgpu::TextureUsages`](https://docs.rs/wgpu/0.17.0/wgpu/struct.TextureUsages.html).
-
-The `render` module
+The render Module
 ---------------------
 I like to separate the rendering code from all the windowing code, so I'll start by creating a file
-named `render.rs`. Every Rust file defines a module with the same name and acts as a namespace
-for all functions and types that are declared in it. I'll add a data structure called `PathTracer`.
-This will hold all GPU resources and eventually implement our path tracing algorithm:
+named `render.rs`. Every Rust file makes up a *module* (with the same name) which serves as a
+namespace for all functions and types that are declared in it. Here I'll add a data structure called
+`PathTracer`. This will hold all GPU resources and eventually implement our path tracing algorithm:
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
     pub struct PathTracer {
@@ -567,9 +557,10 @@ This will hold all GPU resources and eventually implement our path tracing algor
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     [Listing [render-initial]: <kbd>[render.rs]</kbd> The PathTracer structure]
 
-We start out with an associated function called `PathTracer::new` which will initialize all GPU
-resources. The `PathTracer` takes ownership of the `wgpu::Device` and `wgpu::Queue` that we created
-earlier and it will hold on to them for the rest of the application's life.
+We start out with an associated function called `PathTracer::new` which will serve as the
+constructor and eventually initialize all GPU resources. The `PathTracer` takes ownership of the
+`wgpu::Device` and `wgpu::Queue` that we created earlier and it will hold on to them for the rest of
+the application's life.
 
 `wgpu::Device` represents a connection to the GPU. It is responsible for creating resources like
 texture, buffer, and pipeline objects. It also defines some methods for error handling.
@@ -642,58 +633,409 @@ Next, let's declare the `render` module and initialize a `PathTracer` in the `ma
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     [Listing [main-renderer-init]: <kbd>[main.rs]</kbd> Initializing a Renderer]
 
-Now that we have the skeleton in place, it's time to initialize the first resource that will allow
-us to execute code on the GPU.
+Now that we have the skeleton in place, it's time to paint some pixels on the screen.
 
 [^ch3.1-cit1]: This is actually the default behavior so I didn't really need to call
 `on_uncaptured_error`.
 
-The render pipeline
--------------------
-An important component of the GPU is the *hardware rasterizer*. This is a specialized piece of
-hardware tasked with computing the set of pixels covered by a set of geometric primitives. The
-hardware rasterizer is blazingly fast and it lies at the heart of the so called *graphics* or
-*render pipeline*.
+Display Pipeline
+----------------
+Before setting up the render pass let's first talk about how it works. Traditionally, graphics
+systems have been modeled after an abstraction called the *graphics pipeline*.[^foley-vandam] At a
+very high level, the input to the pipeline is a mathematical model that describes what to draw
+-- such as geometry, materials, and light -- and the output is a 2D grid of pixels. This
+transformation is processed in a series of standard *pipeline stages* which form the basis of the
+rendering abstraction provided by GPUs and graphics APIs. wgpu uses the term *render pipeline* which
+is what I'll use going forward.
 
-The main idea is to define the scene (either 3D or 2D) in terms of polygonal meshes, typically made
-of surfaces that are composed of triangles. The hardware rasterizer turns a stream of polygon
-coordinates into pixels that can be painted (or *shaded*). The hardware rasterizer itself is *fixed
-function* -- meaning that it cannot be directly programmed -- and it's used in combination with
-several other "pipeline stages". Two of these stages are programmable on practically all modern
-GPUs: the *vertex* and *fragment processor*.
+The input to the render pipeline is a polygon stream represented by points in 3D space and their
+associated data. The polygons are described in terms of geometric primitives (points, lines, and
+triangles) which consist of *vertices*. The *vertex stage* transforms each vertex from the input
+stream into a 2D coordinate space that corresponds to the viewport. After some additional processing
+(such as clipping and culling) the assembled primitives are passed on to the *rasterizer*.
+The rasterizer applies a process called scan conversion to determine the pixels that are covered by
+each primitive and breaks them up into per-pixel *fragments*. The output of the vertex
+stage (the vertex positions, texture coordinates, vertex colors, etc) gets interpolated between the
+vertices of the primitive and the interpolated values get assigned to each fragment. Fragments are
+then passed on to the *fragment stage* which computes an output (such as the pixel or sample color)
+for each fragment. Shading techniques such as texture mapping and lighting are usually performed
+in this stage. The output then goes through several other operations  before getting written to the
+render target as pixels.[^ch3-footnote1]
 
-The *vertex* stage allows the programmer to dynamically compute data associated with the vertices
-of the input mesh. The primary output of this stage are the positions of all vertices relative to
-the rendered image. The output doesn't need to be limited to just the position and will often
-contain data such as a surface normal or a texture coordinate to be used during shading. The vertex
-stage prepares the input to the hardware rasterizer.
+  ![Figure [render-pipeline]:
+    Vertex and Fragment stages of the render pipeline](../images/fig-01-render-pipeline.svg)
 
-The *fragment* stage runs after the hardware rasterizer has converted each primitive into a pixel
-fragment. One way to think about a fragment is as the visible portion of a primitive (e.g. a
-triangle) covering a region within an individual pixel. The main output of this stage are the
-colors that each primitive contributes to the pixels that it covers. The color computations in a
-fragment shader can get very sophisticated and can involve techniques such as texture mapping or
-tracing rays. Once all primitives have been processed, the resulting color for each pixel gets
-written to the texture designated as the *render target*.
+What I just described is very much a data pipeline: a data stream goes through a series of
+transformations in stages. The input to each stage is defined in terms of smaller elements (e.g.
+vertices and pixel-fragments) that can be processed in parallel. This is the fundamental principle
+behind the GPU.
 
-<!-- TODO: Figure showing triangle rasterization -->
+Early commercial GPUs implemented the graphics pipeline entirely in fixed-function hardware. Modern
+GPUs still use fixed-function stages (and at much greater data rates) but virtually all of them
+allow you to program the vertex and fragment stages with custom logic using *shader programs*.
 
-The point of these programmable stages is that the GPU defines a programming model in which the same 
-logic runs over smaller parts of a large data set in parallel. As an example, imagine that you
-want to simulate the ocean surface. You want to animate waves and paint the surface to look
-realistic with accurate reflections of the sky and the sun. Say, you decide to model the ocean
-surface as a triangle mesh. To determine the final position of each vertex, you evaluate a
-complicated wave function which involves lots of trigonometry. Then for each pixel that the mesh
-covers, you want to compute the color of the water surface using texture lookups and lighting.
 
-Suppose that your ocean surface mesh has 30,000 vertices and the resolution of your render
-target is 1080p, which has around 2,000,000 pixels. Let's say the ocean covers half of the frame,
-so you need to process 30,000 vertex and 1,000,000 fragment computations. To achieve a frame rate of
-60 frames per second (or *fps*) you need to render and present a single frame in under 16
-milliseconds. If you were to process each vertex and fragment sequentially in a loop you would
-easily exceed that time budget. A modern AAA video game can have scenes with more than 200,000
-polygons, complex materials with 4K textures, and use algorithms that require several render passes.
-Without the parallelism of a GPU, achieving real-time performance would be virtually impossible.
+[^ch3-footnote1]: I glossed over a few pipeline stages (such as geometry and tessellation) and
+important steps like multi-sampling, blending, and the scissor/depth/stencil tests. These play an
+important role in many real-time graphics applications but we won't make use of them in our path
+tracer.
+
+### Compiling Shaders
+
+Let's put together a render pipeline that draws a red triangle. We'll define a vertex shader that
+outputs the 3 corner vertices and a fragment shader that outputs a solid color. We'll write
+these shaders in the WebGPU Shading Language (WGSL).
+
+Go ahead and create a file called `shaders.wgsl` to host all of our WGSL code (I put it next to the
+Rust files under `src/`). Before we can run this code on the GPU we need to compile it into a
+form that can be executed on the GPU. We start by creating a *shader module*:
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    pub struct PathTracer {
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+    }
+
+    impl PathTracer {
+        pub fn new(device: wgpu::Device, queue: wgpu::Queue) -> PathTracer {
+            device.on_uncaptured_error(Box::new(|error| {
+                panic!("Aborting due to an error: {}", error);
+            }));
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+            let shader_module = compile_shader_module(&device);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust delete
+            // TODO: initialize GPU resources
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+
+            PathTracer {
+                device,
+                queue,
+            }
+        }
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+
+    fn compile_shader_module(device: &wgpu::Device) -> wgpu::ShaderModule {
+        use std::borrow::Cow;
+
+        let code = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/shaders.wgsl"));
+        device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: None,
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(code)),
+        })
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [render-shader-module]: <kbd>[render.rs]</kbd> Creating the shader module]
+
+The `compile_shader_module` function loads the file we just created into a string using the
+`include_str!` macro. This bundles the contents of `shaders.wgsl` into the program binary at build
+time. This is followed by a call to `wgpu::Device::create_shader_module` to compile the WGSL source
+code.[^ch3-footnote2]
+
+Let's define the vertex and fragment functions, which I'm calling `display_vs` and `display_fs`:
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift highlight
+    alias TriangleVertices = array&ltvec2f, 3>;
+    var<private> vertices: TriangleVertices = TriangleVertices(
+      vec2f(-0.5, -0.5),
+      vec2f( 0.5, -0.5),
+      vec2f( 0.0,  0.5),
+    );
+
+    @vertex fn display_vs(@builtin(vertex_index) vid: u32) -> @builtin(position) vec4f {
+      return vec4f(vertices[vid], 0.0, 1.0);
+    }
+
+    @fragment fn display_fs() -> @location(0) vec4f {
+      return vec4f(1.0, 0.0, 0.0, 1.0);
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [vertex-and-fragment-shaders]: <kbd>[shaders.wgsl]</kbd> Vertex and Fragment shaders]
+
+I'm using the "vs" and "fs" suffixes as shorthand for "vertex stage" and "fragment stage". Together,
+these two functions form our "display pipeline" (the "display" part will become more clear later).
+The `@vertex` and `@fragment` annotations are WGSL keywords that mark these two functions as entry
+points to each pipeline stage program.
+
+Since graphics workloads generally involve a high amount of linear algebra, GPUs natively support
+SIMD operations over vectors and matrices. All shading languages define built-in types for vectors
+and matrices of up to 4 dimensions (4x4 in the case of matrices). The `vec4f` and `vec2f` types that
+are in the code represent 4D and 2D vectors of floating point numbers.
+
+`display_vs` returns the vertex position as a `vec4f`. This position is defined relative to a
+coordinate space called the *Normalized Device Coordinate Space*. In NDC, the center of the viewport
+marks the origin $(0, 0, 0)$. The $x$-axis spans horizontally from $(-1, 0, 0)$ on the left edge of
+the viewport to $(1, 0, 0)$ on the right edge while the $y$-axis spans vertically from $(0,-1,0)$ at
+the bottom to $(0,1,0)$ at the top. The $z$-axis is directly perpendicular to the viewport, going
+*through* the origin.
+
+  ![Figure [ndc]: Our triangle in Normalized Device Coordinates](../images/fig-02-ndc.svg)
+
+`display_vs` takes a *vertex index* as its parameter. The vertex function gets invoked for every
+input vertex across different GPU threads. `vid` identifies the individual vertex that is assigned
+to the *invocation*. The number of vertices and where they exist within the topology of the input
+geometry is up to us to define. Since we want to draw a triangle, we'll later issue a *draw call*
+with 3 vertices and `display_vs` will get invoked exactly 3 times with vertex indices ranging from
+$0$ to $2$.
+
+Since our 2D triangle is viewport-aligned, we can set the $z$ coordinate to $0$. The 4th
+coordinate is known as a *homogeneous coordinate* used for projective transformations. Don't worry
+about this coordinate for now -- just know that for a vector that represents a *position* we set
+this coordinate to $1$. We can declare the $x$ and $y$ coordinates for the 3 vertices as an array
+of `vec2f` and simply return the element that corresponds to `vid`. I enumerate the vertices in
+counter-clockwise order which matches the winding order we'll specify when we create the pipeline.
+
+`display_fs` takes no inputs and returns a `vec4f` that represents the fragment color. The 4
+dimensions represent the red, green, blue, and alpha channels of the destination pixel. `display_fs`
+gets invoked for all pixel fragments that result from our triangle and the invocations are executed
+in parallel across many GPU threads, just like the vertex function. To paint the triangle solid red,
+we simply return `vec4f(1., 0., 0., 1.)` for all fragments.
+
+[^ch3-footnote2]: The `Cow::Borrowed` bit is a Rust idiom that creates a "copy-on-write borrow".
+This allows the API to take ownership of the WGSL string if necessary. This is not really an
+important detail for us.
+
+### Creating the Pipeline Object
+
+Before we can run the shaders, we need to assemble them into a *pipeline state object*. This is
+where we specify the data layout of the render pipeline and link the shaders into a runnable binary
+program. Let's add a new function called `create_display_pipeline`:
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+    fn compile_shader_module(device: &wgpu::Device) -> wgpu::ShaderModule {
+        use std::borrow::Cow;
+
+        let code = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/shaders.wgsl"));
+        device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: None,
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(code)),
+        })
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+
+    fn create_display_pipeline(
+        device: &wgpu::Device,
+        shader_module: &wgpu::ShaderModule,
+    ) -> wgpu::RenderPipeline {
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("display"),
+            layout: None,
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                front_face: wgpu::FrontFace::Ccw,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                ..Default::default()
+            },
+            vertex: wgpu::VertexState {
+                module: shader_module,
+                entry_point: "display_vs",
+                buffers: &[],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: shader_module,
+                entry_point: "display_fs",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: wgpu::TextureFormat::Bgra8Unorm,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+        })
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [display-pipeline]: <kbd>[render.rs]</kbd> The `create_display_pipeline` function]
+
+This code describes a render pipeline that draws a list of triangle primitives. The vertex winding
+order is set to counter-clockwise which defines the orientation of the triangle's *front
+face*.[^ch3-footnote3]
+
+We request that the interior of each polygon be completely filled (rather than drawing just the
+edges or vertices). We specify that `display_vs` is the main function of the vertex stage and that
+we're not providing any vertex data from the CPU (since we declared our vertices in the shader
+code). Similarly, we set up a fragment stage with `display_fs` as the entry point and a single
+color target.[^ch3-footnote4] I set the pixel format of the render target to `Bgra8Unorm`  since
+that happens to be widely supported on all of my devices. What's important is that you assign a
+pixel format that matches the surface configuration in your windowing setup and that your GPU device
+supports this as a *render attachment* format.
+
+Let's instantiate the pipeline and store it in the `PathTracer` object. Pipeline creation is
+expensive so we want to create the pipeline state object once and hold on to it. We'll reference it
+later when drawing a frame:
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    pub struct PathTracer {
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+
+        display_pipeline: wgpu::RenderPipeline,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    }
+
+    impl PathTracer {
+        pub fn new(device: wgpu::Device, queue: wgpu::Queue) -> PathTracer {
+            device.on_uncaptured_error(Box::new(|error| {
+                panic!("Aborting due to an error: {}", error);
+            }));
+
+            let shader_module = compile_shader_module(&device);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+            let display_pipeline = create_display_pipeline(&device, &shader_module);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+
+            PathTracer {
+                device,
+                queue,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+                display_pipeline,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+            }
+        }
+        ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [display-pipeline-init]: <kbd>[render.rs]</kbd> Initializing the display pipeline]
+
+
+[^ch3-footnote3]: The GPU can automatically discard triangles that are oriented away from the
+viewport. This is a feature called *back face culling* which our code doesn't make use of.
+
+[^ch3-footnote4]: The `fragment` field of `wgpu::RenderPipelineDescriptor` is optional
+(notice the *Some* in `Some(wgpu::FragmentState {...})` ?). A render pipeline that only outputs to
+the depth or stencil buffers doesn't have to specify a fragment shader or any color attachments. An
+example of this is *shadow mapping*: a shadow map is a texture that stores the distances between a
+light source and geometry samples from the scene; it can be produced by a depth-only render-pass
+from the point of view of the light source. The shadow map is later sampled from a render pass from
+the camera's point of view to determine whether a rasterized point is visible from the light or in
+shadow.
+
+### The Render Pass
+
+We now have the pieces in place to issue a draw command to the GPU. The general abstraction modern
+graphics APIs define for this is called a "command buffer" (or "command list" in D3D12). You can
+think of the command buffer as a memory location that holds the serialized list of GPU commands
+representing the sequence of actions we want the GPU to take. To draw a triangle we'll *encode*
+a draw command into the command buffer and then *submit* the command buffer to the GPU for exection.
+
+With wgpu, the encoding is abstracted by an object called `wgpu::CommandEncoder`, which we'll use to
+record our draw command. Once we are done, we will call `wgpu::CommandEncoder::finish()` to produce
+a finalized `wgpu::CommandBuffer` which we can submit to the GPU via the `wgpu::Queue` that we
+created at start up.
+
+Let's add a new `PathTracer` function called `render_frame`. This function will take a texture as
+its parameter (our *render target*) and tell the GPU to draw to it using the pipeline object we
+created earlier:
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+    impl PathTracer {
+        ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        pub fn render_frame(&self, target: &wgpu::TextureView) {
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("render frame"),
+                });
+
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("display pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: target,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: true,
+                    },
+                })],
+                depth_stencil_attachment: None,
+            });
+
+            render_pass.set_pipeline(&self.display_pipeline);
+
+            // Draw 1 instance of a polygon with 3 vertices.
+            render_pass.draw(0..3, 0..1);
+
+            // End the render pass by consuming the object.
+            drop(render_pass);
+
+            let command_buffer = encoder.finish()
+            self.queue.submit(Some(command_buffer));
+        }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [render_frame-stub]: <kbd>[render.rs]</kbd> The `render_frame` function]
+
+`target` here is defined as a `wgpu::TextureView`. wgpu makes the distinction between a texture
+resource (represented by `wgpu::Texture`) and how that texture's memory is accessed by a pipeline
+(which is represented by the *view* into the texture). When we want to bind a texture we first
+create a view with the right properties. In this case we'll assume that the caller already created
+a `TextureView` of the render target.
+
+The first thing we do in `render_frame` is create a command encoder. We then tell the encoder to
+begin a *render pass*. There are 4 important API calls we make to encode the draw command:
+
+1. Create a `wgpu::RenderPass`. We tell it to store the colors that are output by the render
+   pipeline to the `target` texture by assigning it as the only color attachment. We also tell it
+   to clear all pixels of the target to black (i.e. $(0, 0, 0, 1)$ in RGBA) before drawing to it.
+
+2. Assign the render pipeline.
+
+3. Record a single draw with 3 vertices.
+
+4. End the render pass by destroying the `wgpu::RenderPass` object.
+
+We then serialize the command buffer and submit it to the GPU. Finally, let's invoke `render_frame`
+from our windowing event loop, using the current surface texture as the render target:
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    async fn main() -> Result<()> {
+        ...
+        event_loop.run(move |event, _, control_flow| {
+                ...
+                Event::RedrawRequested(_) => {
+                    // Wait for the next available frame buffer.
+                    let frame: wgpu::SurfaceTexture = surface
+                        .get_current_texture()
+                        .expect("failed to get current texture");
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust delete
+                    // TODO: draw frame
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+                    let render_target = frame
+                        .texture
+                        .create_view(&wgpu::TextureViewDescriptor::default());
+
+                    renderer.render_frame(&render_target);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+
+                    frame.present();
+                }
+                ...
+        });
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [render_frame-call]: <kbd>[render.rs]</kbd> Rendering to a surface texture]
+
+Running this code should bring up a window that looks like this:
+
+  ![Figure [first-triangle]: First Triangle](../images/img-02-first-triangle.png)
+
+Finally, we're drawing stuff! At this point, you wouldn't be wrong if you were thinking that this
+was *a lot* of boilerplate just to draw a triangle.
+
+
+References
+==========
+[^foley-vandam]: J.F. Hughes, A. van Dam, M. McGuire, D.F. Sklar, J.D. Foley, S.K. Feiner, K. Akeley *Computer Graphics: Principles and Practice, 3rd Edition, Section 1.6*
 
 [Arman Uguray]:       https://github.com/armansito
 [Steve Hollasch]:     https://github.com/hollasch
