@@ -1,3 +1,6 @@
+// Originally written in 2023 by Arman Uguray <arman.uguray@gmail.com>
+// SPDX-License-Identifier: CC-BY-4.0
+
 alias TriangleVertices = array<vec2f, 3>;
 var<private> vertices: TriangleVertices = TriangleVertices(
   vec2f(-0.5, -0.5),
