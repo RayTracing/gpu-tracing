@@ -46,8 +46,8 @@ impl PathTracer {
 
         render_pass.set_pipeline(&self.display_pipeline);
 
-        // Draw 1 instance of a polygon with 3 vertices
-        render_pass.draw(0..3, 0..1);
+        // Draw 1 instance of a polygon with 6 vertices
+        render_pass.draw(0..6, 0..1);
 
         // End the render pass by consuming the object.
         drop(render_pass);

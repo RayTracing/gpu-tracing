@@ -182,7 +182,7 @@ and handle them as they arrive by looping indefinitely:
 
     fn main() -> Result&lt()&gt {
         let event_loop = EventLoop::new();
-        let window_size = winit::dpi::LogicalSize::new(WIDTH, HEIGHT);
+        let window_size = winit::dpi::PhysicalSize::new(WIDTH, HEIGHT);
         let window = WindowBuilder::new()
             .with_inner_size(window_size)
             .with_title("GPU Path Tracer".to_string())
@@ -340,7 +340,7 @@ longer than a display refresh cycle to finish its tasks), then calling
     async fn main() -> Result&lt()&gt {
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
         let event_loop = EventLoop::new();
-        let window_size = winit::dpi::LogicalSize::new(WIDTH, HEIGHT);
+        let window_size = winit::dpi::PhysicalSize::new(WIDTH, HEIGHT);
         let window = WindowBuilder::new()
             .with_inner_size(window_size)
             .with_title("GPU Path Tracer".to_string())
@@ -593,7 +593,7 @@ Next, let's declare the `render` module and initialize a `PathTracer` in the `ma
     #[pollster::main]
     async fn main() -> Result<()> {
         let event_loop = EventLoop::new();
-        let window_size = winit::dpi::LogicalSize::new(WIDTH, HEIGHT);
+        let window_size = winit::dpi::PhysicalSize::new(WIDTH, HEIGHT);
         let window = WindowBuilder::new()
             .with_inner_size(window_size)
             .with_resizable(false)
@@ -915,7 +915,8 @@ from the point of view of the light source. The shadow map is later sampled from
 the camera's point of view to determine whether a rasterized point is visible from the light or in
 shadow.
 
-### The Render Pass
+The Render Pass
+---------------
 
 We now have the pieces in place to issue a draw command to the GPU. The general abstraction modern
 graphics APIs define for this is called a "command buffer" (or "command list" in D3D12). You can
@@ -1029,8 +1030,148 @@ Running this code should bring up a window that looks like this:
 
   ![Figure [first-triangle]: First Triangle](../images/img-02-first-triangle.png)
 
-Finally, we're drawing stuff! At this point, you wouldn't be wrong if you were thinking that this
-was *a lot* of boilerplate just to draw a triangle.
+Finally drawing something! A single triangle may not look that interesting but you can model highly
+complex 3D scenes and geometry by putting many of them together. It takes only a few tweaks to the
+render pipeline to shape, animate, and render millions of triangles many times per second.
+
+
+Full-Screen Quad
+----------------
+The render pipeline that we just put together plays a rather small role in the overall renderer:
+its purpose is to display the output of the path-tracer on the window surface.
+
+The output of our renderer is a 2D rectangular image and I would like it to fill the whole window.
+We can achieve this by having the render pipeline draw two right triangles that are adjacent at
+their hypothenuse. Remember that the viewport coordinates span the range $[-1, 1]$ in NDC, so
+setting the 4 corners of the rectangle to $(-1, 1)$, $(1, 1)$, $(1, -1)$, $(-1, -1)$ should cover
+the entire viewport regardless of its dimensions.
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift delete 
+    alias TriangleVertices = array&ltvec2f, 3>;
+    var<private> vertices: TriangleVertices = TriangleVertices(
+      vec2f(-0.5, -0.5),
+      vec2f( 0.5, -0.5),
+      vec2f( 0.0,  0.5),
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift highlight
+    alias QuadVertices = array&ltvec2f, 6>;
+    var<private> vertices: TriangleVertices = TriangleVertices(
+      vec2f(-1.0,  1.0),
+      vec2f(-1.0, -1.0),
+      vec2f( 1.0,  1.0),
+      vec2f( 1.0,  1.0),
+      vec2f(-1.0, -1.0),
+      vec2f( 1.0, -1.0),
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
+    );
+
+    @vertex fn display_vs(@builtin(vertex_index) vid: u32) -> @builtin(position) vec4f {
+      return vec4f(vertices[vid], 0.0, 1.0);
+    }
+
+    @fragment fn display_fs() -> @location(0) vec4f {
+      return vec4f(1.0, 0.0, 0.0, 1.0);
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [quad-vertices]: <kbd>[shaders.wgsl]</kbd> Full-Screen Quad Vertices]
+
+
+  ![Figure [half-screen-quad]: Half-Screen Triangle](../images/img-03-half-screen-quad.png)
+
+That painted only one of the triangles. We also need to update the draw command with the new vertex
+count:
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+    impl PathTracer {
+        ...
+        pub fn render_frame(&self, target: &wgpu::TextureView) {
+            ...
+            render_pass.set_pipeline(&self.display_pipeline);
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust delete
+            // Draw 1 instance of a polygon with 3 vertices.
+            render_pass.draw(0..3, 0..1);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+            // Draw 1 instance of a polygon with 6 vertices.
+            render_pass.draw(0..6, 0..1);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+
+            // End the render pass by consuming the object.
+            drop(render_pass);
+
+            let command_buffer = encoder.finish()
+            self.queue.submit(Some(command_buffer));
+        }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [render_frame-stub]: <kbd>[render.rs]</kbd> The `render_frame` function]
+
+
+  ![Figure [full-screen-quad]: Full-Screen Quad](../images/img-04-full-screen-quad.png)
+
+
+### Viewport Coordinates
+
+In this setup, every fragment shader invocation outputs the color of a single pixel. We can identify
+that pixel using the built-in `position` input to the pipeline stage.
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift highlight
+    @fragment fn display_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
+      return vec4f(1.0, 0.0, 0.0, 1.0);
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [position-builtin]: <kbd>[shaders.wgsl]</kbd> Position Built-In]
+
+The input is defined as a `vec4f`. The $x$ and $y$ coordinates are defined in the _Viewport
+Coordinate System_. The origin $(0, 0)$ corresponds to the top-left corner pixel of the viewport.
+The $x$-coordinate increases towards the right and the $y$-coordinate increases towards the bottom.
+A whole number increment in $x$ or $y$ represents an increment by 1 pixel (and fractional increments
+can fall "inside" a pixel). For example, for a viewport with the physical dimensions of
+$800\times600$, the coordinate ranges are $0\le x\lt799, 0\le y \lt599$.
+
+  ![Figure [viewport-coords]: Viewport Coordinate System](../images/fig-03-viewport-coords.svg)
+
+Let's assign every pixel fragment a color based on its position in the viewport by mapping the
+coordinates to a color channel (red and green). The render target uses a normalized color format
+(i.e. the values must be between $0$ and $1$), so we divide each dimension by the largest possible
+value to convert it to that range:
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift highlight
+    const WIDTH: u32 = 800u;
+    const HEIGHT: u32 = 600u;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
+
+    @fragment fn display_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift highlight
+      let color = pos.xy / vec2f(f32(WIDTH - 1u), f32(HEIGHT - 1u));
+      return vec4f(color, 0.0, 1.0);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [pos-to-color]: <kbd>[shaders.wgsl]</kbd>]
+
+Which should produce a picture like this:
+
+  ![Figure [viewport-gradient]:
+    Viewport Coordinates as a color gradient](../images/img-05-viewport-gradient.png)
+
+You are now able to color each individual pixel. Next, we'll start putting together the path tracing
+pipeline.
+
+
+Casting Rays
+====================================================================================================
 
 
 References

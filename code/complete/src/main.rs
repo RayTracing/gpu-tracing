@@ -18,7 +18,7 @@ const HEIGHT: u32 = 600;
 #[pollster::main]
 async fn main() -> Result<()> {
     let event_loop = EventLoop::new();
-    let window_size = winit::dpi::LogicalSize::new(WIDTH, HEIGHT);
+    let window_size = winit::dpi::PhysicalSize::new(WIDTH, HEIGHT);
     let window = WindowBuilder::new()
         .with_inner_size(window_size)
         .with_resizable(false)
