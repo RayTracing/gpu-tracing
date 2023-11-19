@@ -1161,16 +1161,23 @@ value to convert it to that range:
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     [Listing [pos-to-color]: <kbd>[shaders.wgsl]</kbd>]
 
-Which should produce a picture like this:
+There are two language expressions here that are worth highlighting. `pos.xy` is a so called
+_vector swizzle_ that extracts the $x$ and $y$ components and produces a `vec2f` containing only
+those. Next, we divide that `vec2f` by another `vec2f`. Here, the division operator performs a
+component-wise division of every element of the vector on the left-hand side by the corresponding
+element on the right-hand side, so `pos.xy / vec2f(f32(WIDTH - 1u), f32(HEIGHT - 1u))` is equivalent
+to `vec2f(pos.x / f32(WIDTH - 1u), pos.y / f32(HEIGHT - 1u))`.
+
+Running this should produce a picture like this:
 
   ![Figure [viewport-gradient]:
     Viewport Coordinates as a color gradient](../images/img-05-viewport-gradient.png)
 
-You are now able to color each individual pixel. Next, we'll start putting together the path tracing
-pipeline.
+You are now able to color each individual pixel. Next, we'll start putting together the pipeline for
+ray tracing.
 
 
-Casting Rays
+Ray Casting
 ====================================================================================================
 
 
