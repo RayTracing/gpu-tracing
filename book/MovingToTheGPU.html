@@ -10,36 +10,49 @@
 
 Introduction
 ====================================================================================================
-If you ever build your own path tracer you'll quickly appreciate the quality of the images you can
-get with relatively few lines of code. You'll also notice that rendering an image takes a long time.
-A path tracer estimates _Global Illumination_ by tracing tens of millions of rays through the scene.
-The results are photorealistic because they can be close to physically accurate but that comes at a
-high computational cost. This has historically made path tracing unsuitable for real-time
-applications.
+_Ray Tracing_ is a rendering method that simulates the flow of light. It can faithfully recreate a
+variety of optical phenomena and can be used to render photorealistic images. It is one of the
+foundational techniques in Computer Graphics used to model light transport.
 
-Fortunately -- like most applications in Computer Graphics -- the algorithm lends itself very well
-to parallelism and we can use a GPU to exploit this to massively speed up render times. In this book
-I'll show you a way to write a GPU accelerated path tracer targeting a modern GPU API. I'll focus on
-building a renderer that can produce high quality and correct images using a fairly simple design.
-It won't be full-featured and its performance will be limited, but it can serve as a great starting
-point for extensions and experiments with more advanced GPU techniques.
+_Path tracing_ is an application of this approach in order to compute _Global Illumination_. Its
+core idea is to repeatedly trace millions of random rays through the scene and bounce them off
+objects based on surface properties. The algorithm is remarkably simple and it is relatively easy
+to build a basic path tracer that supports a small number of material and geometry types. Peter
+Shirley's [_Ray Tracing In One Weekend_][RTIOW] shows you how to get started with a CPU path tracer
+in a quick and enjoyable way.
 
-This book primarily focuses on GPU programming fundamentals. It follows the same progression found
-in Peter Shirley's [_Ray Tracing In One Weekend_][RTIOW], which is the first in a [brilliant series
-of books](https://raytracing.github.io) that guide you through building a CPU path tracer. I cover a
-lot of the same material but I highly recommend that you at least complete _In One Weekend_ before
-embarking on building the GPU version -- doing so will teach you the path tracing algorithm in a
-much simpler way and it will make you appreciate both the advantages and the challenges of moving to
-a GPU-based architecture.
+A big challenge with path tracing is its high computational cost. Rendering a complex scene takes a
+long time and this get worse as complexity increases. This has historically made path
+tracing unsuitable for real-time applications. Fortunately -- like many problems in Computer
+Graphics -- the algorithm lends itself very well to parallelism and it is possible to achieve a
+significant speedup by distributing the work across many processor cores. This brings us to GPUs.
 
-Targeting a GPU requires you to program in a way that is different from how you would typically
-approach a CPU program. Taking full advantage of the hardware requires very careful tuning based on
-its architecture and capabilities. I discuss performance considerations when they matter but I have
-generally avoided optimizations and instead prioritized simplicity.
+The GPU (Graphics Processing Unit) is a type of processor designed to run the same set of oparations
+over large amounts of data in parallel. This parallelism has been instrumental to achieving
+realistic visuals in real-time applications like video games. GPUs were traditionally used to
+accelerate _scanline rasterization_ but they have since become programmable and capable of running
+a variety of parallel workloads. Notably, dedicated hardware cores to accelerate ray tracing are
+becoming more common in modern GPUs.
 
-With that being said, the code you'll build by the end of this book can achieve high frame rates on
-a decent enough GPU.[^ch1] The performance will highly depend on your GPU but you should
-generally be able to achieve near-interactive rates with a small amount of tuning.
+GPUs aren't without limitations. Targeting a GPU requires you to program in a way that is different
+from how you would typically approach a CPU program. Taking full advantage of the hardware requires
+very careful tuning based on its architecture and capabilities (which can vary widely across GPU
+vendors and models). Rendering fully path-traced scenes at real-time rates remains elusive even on
+the most high-end GPUs and is an active and vibrant area of research.
+
+This book is an introduction to GPU programming by building a simple GPU accelerated path tracer.
+We'll focus on building a renderer that can produce high quality and correct images using a fairly
+simple design. It won't be full-featured and its performance will be limited but it will expose you
+to several fundamental GPU programming concepts. The renderer you'll have built by the end can serve
+as a great starting point for extensions and experiments with more advanced GPU techniques. We will
+avoid most optimizations in favor of simplicity but the renderer will be able to achieve interactive
+frame rates on a decent GPU.[^ch1]
+
+The book follows a similar progression to [_Ray Tracing In One Weekend_][RTIOW]. I cover some of
+the same material but I highly recommend completing _RTIOW_ before embarking on building
+the GPU version since doing so will teach you the path tracing algorithm in a much more approachable
+way and it will make you appreciate both the advantages and challenges of moving to a GPU-based
+architecture.
 
 If you run into any problems with your implementation, have general questions or corrections, or
 would like to share own ideas or work, check out [the GitHub Discussions forum][discussions].
@@ -48,10 +61,10 @@ Finally, I'd like to extend a special thank you to [Steve Hollasch][] and [Trevo
 their guidance and for allowing me to host this book under the [RayTracing GitHub
 project][rt-project].
 
-[^ch1]: A BVH-accelerated implementation can render a modified version of the _Ray Tracing In One
-Weekend_ cover scene with ~32,000 spheres, 16 ray bounces per pixel, and a resolution of 2048x1536
-on a 2022 _Apple M1 Max_ in 15 milliseconds. The same renderer performs very poorly on a 2019 _Intel
-UHD Graphics 630_ which takes more than 200ms.
+[^ch1]: A BVH-accelerated implementation can render a version of the RTIOW cover scene with ~32,000
+spheres, 16 ray bounces per pixel, and a resolution of 2048x1536 on a 2022 _Apple M1 Max_ in 15
+milliseconds. The same renderer performs very poorly on a 2019 _Intel UHD Graphics 630_ which takes
+more than 200ms to render a single sample.
 
 GPU APIs
 --------
@@ -90,7 +103,7 @@ amount of setup code for the windowing logic to help get you started.
 
 ### A note on Rust, Libraries, and APIs
 
-I chose Rust for this project because of it's ease of use and portability. It also happens to be the
+I chose Rust for this project because of its ease of use and portability. It also happens to be the
 language that I tend to be most productive in.
 
 An important aspect of Rust is that a lot of common functionality is provided by libraries outside
