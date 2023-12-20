@@ -965,10 +965,10 @@ created earlier:
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                        store: true,
+                        store: wgpu::StoreOp::Store,
                     },
                 })],
-                depth_stencil_attachment: None,
+                ..Default::default()
             });
 
             render_pass.set_pipeline(&self.display_pipeline);
@@ -1127,8 +1127,8 @@ count:
   ![Figure [full-screen-quad]: Full-Screen Quad](../images/img-04-full-screen-quad.png)
 
 
-### Viewport Coordinates
-
+Viewport Coordinates
+--------------------
 In this setup, every fragment shader invocation outputs the color of a single pixel. We can identify
 that pixel using the built-in `position` input to the pipeline stage.
 
@@ -1181,13 +1181,435 @@ component-wise division of every element of the vector on the left-hand side by 
 element on the right-hand side, so `pos.xy / vec2f(f32(WIDTH - 1u), f32(HEIGHT - 1u))` is equivalent
 to `vec2f(pos.x / f32(WIDTH - 1u), pos.y / f32(HEIGHT - 1u))`.
 
-Running this should produce a picture like this:
+Now we are able to separately color each individual pixel. Running this should produce a picture
+that looks like this:
 
   ![Figure [viewport-gradient]:
     Viewport Coordinates as a color gradient](../images/img-05-viewport-gradient.png)
 
-You are now able to color each individual pixel. Next, we'll start putting together the pipeline for
-ray tracing.
+
+Resource Bindings
+====================================================================================================
+Our program is split across separate runnable parts: the main executable that runs on the CPU and
+pipelines that run on the GPU. As we add more features we will want to exchange data between the
+different parts. The main way to achieve this is via memory resources.
+
+The CPU side of our program can create and interact with resources by making API calls. On the GPU
+side, the shader program can access those via _bindings_. A binding associates a resource with a
+unique slot number that can be referenced by the shader. Each slot is identified by an index number.
+The shader code declares a variable for each binding with a decoration that assigns it a binding
+index. The CPU side is responsible for setting up the resources for a GPU pipeline according to its
+binding layout.
+
+WebGPU introduces an additional concept around bindings called _bind group_. A bind group
+associates a group of resources that are frequently bound together.[^ch4-footnote1] Like individual
+bindings, each bind group is identified by an index number. Our pipelines won't make use of more
+than one bind group at a time, so we'll always assign $0$ as the group index.
+
+[^ch4-footnote1]:  The bind group concept is similar to "descriptor set" in Vulkan, "descriptor
+table" in D3D12, and "argument buffer" in Metal.
+
+
+Uniform Declaration
+-------------------
+The first binding we are going to set up is a _uniform buffer_. Uniforms are read-only data that
+don't vary across GPU threads. We are going to use a uniform buffer to store certain globals, like
+camera parameters.
+
+Our renderer currently assumes a window dimension of $800\times600$ and declares this in two
+different places (`shaders.wgsl` and `main.rs`) which must be kept in sync. Let's make `WIDTH` and
+`HEIGHT` uniforms and upload their values from the CPU side. We'll first declare a uniform buffer
+and assign it to binding index $0$:
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift highlight
+    struct Uniforms {
+      width: u32,
+      height: u32,
+    }
+    @group(0) @binding(0) var<uniform> uniforms: Uniforms;
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift delete
+    const WIDTH: u32 = 800u;
+    const HEIGHT: u32 = 600u;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
+
+    @fragment fn display_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift highlight
+      let color = pos.xy / vec2f(f32(uniforms.width - 1u), f32(uniforms.height - 1u));
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
+      return vec4f(color, 0.0, 1.0);
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [uniform binding declaration]: <kbd>[shaders.wgsl]</kbd> Uniform binding declaration]
+
+The `var<uniform>` declaration tells the compiler that the shader expects a uniform buffer binding.
+The type of the binding variable is `Uniforms` which represents the shader's view over the buffer's
+memory. Declaring it this way allows the shader to access the contents of the buffer with an
+expression like `uniforms.width`.
+
+
+Bind Group Layout
+-----------------
+If you run the code now you should get a validation error telling you that the pipeline layout
+expects a bind group layout at index $0$. We need to update the display pipeline description with a
+layout that includes the new uniform binding. Let's update the `create_display_pipeline` function
+to return a `wgpu::BindGroupLayout` alongside the pipeline object:
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    impl PathTracer {
+        pub fn new(device: wgpu::Device, queue: wgpu::Queue) -> PathTracer {
+            device.on_uncaptured_error(Box::new(|error| {
+                panic!("Aborting due to an error: {}", error);
+            }));
+
+            let shader_module = compile_shader_module(&device);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+            let (display_pipeline, display_layout) =
+                create_display_pipeline(&device, &shader_module);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+            ...
+        }
+        ...
+    }
+    ...
+    fn create_display_pipeline(
+        device: &wgpu::Device,
+        shader_module: &wgpu::ShaderModule,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+    ) -> (wgpu::RenderPipeline, wgpu::BindGroupLayout) {
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: None,
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+            label: Some("display"),
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+            layout: Some(&device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                bind_group_layouts: &[&bind_group_layout],
+                ..Default::default()
+            })),
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+            ...
+        });
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        (pipeline, bind_group_layout)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [display-pipeline-layout]: <kbd>[render.rs]</kbd> Display pipeline layout]
+
+This says that the pipeline contains a single bind group, containing a single buffer entry. The
+buffer entry has the "uniform" buffer binding type and is visible only to the fragment stage.
+
+
+Buffer Object
+-------------
+Let's now create the buffer object that will provide the backing memory for the uniforms. The
+size and layout of the memory need to match the `Uniforms` struct that we declared in the WGSL. A
+common pattern is to maintain two sets of these declarations (one for the CPU and one for the GPU
+side) and keep them in sync. Some frameworks allow you to reuse the same declarations on both sides.
+_wgpu_ doesn't provide a utility for this out of the box, so I'm going to redeclare `Uniforms` for
+the CPU side:
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+    use bytemuck::{Pod, Zeroable};
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+
+    pub struct PathTracer {
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+
+        display_pipeline: wgpu::RenderPipeline,
+    }
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+    #[derive(Copy, Clone, Pod, Zeroable)]
+    #[repr(C)]
+    struct Uniforms {
+        width: u32,
+        height: u32,
+    }
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    impl PathTracer {
+        ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [uniforms-struct-cpu]: <kbd>[render.rs]</kbd> CPU-side `Uniforms` struct]
+
+
+The `repr(C)` attribute makes the memory layout of the `Uniforms` struct conform to the C language
+rules so that the fields have a predictable order, size, and alignment.[^ch4-footnote2] For our
+purposes, this should make the memory layout of the struct exactly match the WGSL declaration.
+
+The `derive` attribute automatically implements the enumerated traits for our type. `Copy` and
+`Clone` allow the type be copied by value (Rust types are move-only by default). This is also the
+first time we are using the `bytemuck` crate. The `Pod` and `Zeroable` traits, along with `repr(C)`,
+allow us the safely reinterpret the `Uniforms` struct as a sequence of bytes.
+
+For all intents and purposes, these Rust attributes enable the same semantics as the following plain
+C/C++ struct:
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ C
+    // If `Uniforms` were declared in C:
+    struct Uniforms {
+        uint32_t width;
+        uint32_t height;
+    };
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Now, let's allocate the backing buffer object and initialize its contents:
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    use bytemuck::{Pod, Zeroable};
+
+    pub struct PathTracer {
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        uniforms: Uniforms,
+        uniform_buffer: wgpu::Buffer,
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+        display_pipeline: wgpu::RenderPipeline,
+    }
+
+    #[derive(Copy, Clone, Pod, Zeroable)]
+    #[repr(C)]
+    struct Uniforms {
+        width: u32,
+        height: u32,
+    }
+
+    impl PathTracer {
+        pub fn new(device: wgpu::Device, queue: wgpu::Queue) -> PathTracer {
+            device.on_uncaptured_error(Box::new(|error| {
+                panic!("Aborting due to an error: {}", error);
+            }));
+
+            let shader_module = compile_shader_module(&device);
+            let (display_pipeline, display_layout) =
+                create_display_pipeline(&device, &shader_module);
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+            // Initialize the uniform buffer.
+            let uniforms = Uniforms {
+                width: 800,
+                height: 600,
+            };
+            let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("uniforms"),
+                size: std::mem::size_of::&ltUniforms&gt() as u64,
+                usage: wgpu::BufferUsages::UNIFORM,
+                mapped_at_creation: true,
+            });
+            uniform_buffer
+                .slice(..)
+                .get_mapped_range_mut()
+                .copy_from_slice(bytemuck::bytes_of(&uniforms));
+            uniform_buffer.unmap();
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+            PathTracer {
+                device,
+                queue,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+                uniforms,
+                uniform_buffer,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+                display_pipeline,
+            }
+        }
+        ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [uniforms-struct-cpu]: <kbd>[render.rs]</kbd> Uniform buffer object initialization]
+
+This code allocates a buffer resource that is large enough to store an instance of `Uniforms` and
+copies the contents of `uniforms` into it. The buffer is mapped at creation so that its address
+space accessible to the CPU side. We also declare its usage to be `UNIFORM`: this is a hint to
+the GPU driver that allows it to perform optimizations based on the buffer access pattern. The usage
+is also useful for validating that the bindings we provide conform to the pipeline's layout.
+
+After the data copy, we need to flush and unmap the buffer from CPU memory before we can use it in
+GPU commands. We also store both `uniforms` and `uniform_buffer`, since we'll reuse them to modify
+some of the uniforms at runtime.
+
+[^ch4-footnote2]: The default Rust layout representation doesn't provide a strong guarantee on the
+order of the fields. See the [Rust reference](https://doc.rust-lang.org/reference/type-layout.html#representations).
+
+Bind Group
+----------
+We need to associate the buffer object with a bind group with the correct layout before it can be
+used in a render pass. Let's create and store a bind group and assign it to group index $0$ while
+encoding the draw:
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    use bytemuck::{Pod, Zeroable};
+
+    pub struct PathTracer {
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+
+        uniforms: Uniforms,
+        uniform_buffer: wgpu::Buffer,
+
+        display_pipeline: wgpu::RenderPipeline,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        display_bind_group: wgpu::BindGroup,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    }
+
+    #[derive(Copy, Clone, Pod, Zeroable)]
+    #[repr(C)]
+    struct Uniforms {
+        width: u32,
+        height: u32,
+    }
+
+    impl PathTracer {
+        pub fn new(device: wgpu::Device, queue: wgpu::Queue) -> PathTracer {
+            ...
+            uniform_buffer.unmap();
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+            // Create the display pipeline bind group.
+            let display_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: None,
+                layout: &display_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &uniform_buffer,
+                        offset: 0,
+                        size: None,
+                    }),
+                }],
+            });
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+            PathTracer {
+                device,
+                queue,
+                uniforms,
+                uniform_buffer,
+                display_pipeline,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+                display_bind_group,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+            }
+        }
+
+        pub fn render_frame(&self, target: &wgpu::TextureView) {
+            ...
+            render_pass.set_pipeline(&self.display_pipeline);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+            render_pass.set_bind_group(0, &self.display_bind_group, &[]);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+
+            // Draw 1 instance of a polygon with 6 vertices
+            render_pass.draw(0..6, 0..1);
+            ...
+        }
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [display-bind-group]: <kbd>[render.rs]</kbd>
+     Creating and using the display bind group]
+
+Running the program now should bring up the same picture as before. The viewport dimensions are
+still hardcoded in two places so let's clean that up by making the viewport width and height
+parameters of the `PathTracer` constructor:
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    impl PathTracer {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        pub fn new(
+            device: wgpu::Device,
+            queue: wgpu::Queue,
+            width: u32,
+            height: u32,
+        ) -> PathTracer {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+            device.on_uncaptured_error(Box::new(|error| {
+                panic!("Aborting due to an error: {}", error);
+            }));
+
+            let shader_module = compile_shader_module(&device);
+            let (display_pipeline, display_layout) =
+                create_display_pipeline(&device, &shader_module);
+
+            // Initialize the uniform buffer.
+            let uniforms = Uniforms {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+                width,
+                height,
+            };
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+            ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [width-height-parameters]: <kbd>[render.rs]</kbd>]
+
+Let's update the main function to pass in the physical window dimensions while creating the
+`PathTracer`:
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+    const WIDTH: u32 = 800;
+    const HEIGHT: u32 = 600;
+
+    #[pollster::main]
+    async fn main() -> Result<()> {
+        let event_loop = EventLoop::new();
+        let window_size = winit::dpi::PhysicalSize::new(WIDTH, HEIGHT);
+        let window = WindowBuilder::new()
+            .with_inner_size(window_size)
+            .with_resizable(false)
+            .with_title("GPU Path Tracer".to_string())
+            .build(&event_loop)?;
+
+        let (device, queue, surface) = connect_to_gpu(&window).await?;
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        let renderer = render::PathTracer::new(device, queue, WIDTH, HEIGHT);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+
+        event_loop.run(move |event, _, control_flow| {
+        ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [width-height-parameters-main]: <kbd>[main.rs]</kbd>]
+
+Now we have a means for passing data between the CPU and GPU sides of the program. We will repeat
+this pattern a few times when we define the bind group layout of new pipelines.
+
+With all of this in place, let's start tracing rays.
 
 
 Ray Casting

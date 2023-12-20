@@ -27,7 +27,7 @@ async fn main() -> Result<()> {
 
     let (device, queue, surface) = connect_to_gpu(&window).await?;
 
-    let renderer = render::PathTracer::new(device, queue);
+    let renderer = render::PathTracer::new(device, queue, WIDTH, HEIGHT);
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Poll;
