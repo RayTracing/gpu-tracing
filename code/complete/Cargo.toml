@@ -8,4 +8,4 @@ anyhow = "1.0.68"
 bytemuck = { version = "1.13.1", features = ["derive"] }
 pollster = { version = "0.3", features = ["macro"] }
 winit = "0.28.6"
-wgpu = "0.17"
+wgpu = "0.18"
