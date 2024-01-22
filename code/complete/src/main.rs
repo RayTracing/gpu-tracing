@@ -12,8 +12,8 @@ use {
 
 mod render;
 
-const WIDTH: u32 = 800;
-const HEIGHT: u32 = 600;
+const WIDTH: u32 = 1600;
+const HEIGHT: u32 = 1200;
 
 #[pollster::main]
 async fn main() -> Result<()> {
