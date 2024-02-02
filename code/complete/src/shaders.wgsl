@@ -36,9 +36,11 @@ var<private> vertices: QuadVertices = QuadVertices(
   let focus_distance = 1.;
   let aspect_ratio = f32(uniforms.width) / f32(uniforms.height);
 
-  // Map `pos` from y-down viewport coordinates to camera coordinates.
+  // Normalize the viewport coordinates.
   var uv = pos.xy / vec2f(f32(uniforms.width - 1u), f32(uniforms.height - 1u));
-  uv = vec2(uv.x - 0.5, 0.5 - uv.y) * vec2(1., aspect_ratio);
+
+  // Map `uv` from y-down (normalized) viewport coordinates to camera coordinates.
+  uv = 2. * (uv - vec2(0.5)) * vec2(1., -aspect_ratio);
 
   let direction = vec3(uv, -focus_distance);
   let ray = Ray(origin, direction);

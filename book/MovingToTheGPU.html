@@ -1658,26 +1658,32 @@ Let's define the data structure to represent a ray:
     [Listing [ray-struct]: <kbd>[shaders.wgsl]</kbd> Ray structure]
 
 
-Let's model a simple pinhole camera. Initially we'll the define the eye position (where the arriving
-light gets focused) as the camera's origin and this will act as the origin for all camera rays.
-The camera has a view direction, and some distance away from the origin along the view direction
-sits the 2D viewport framing the rendered image.
+Let's now model a simple pinhole camera. Initially we'll the define the eye position (where the
+arriving light gets focused) as the camera's origin and this will act as the origin for all camera
+rays. The camera has a view direction, and some distance away from the origin along the view
+direction sits the 2D viewport framing the rendered image.
 
 We will initially position the camera origin at $(0, 0, 0)$ and set the view direction towards the
-$-z$-axis in a 3-dimensional right-handed cartesian coordinate system.
+$-z$-axis in a 3-dimensional right-handed cartesian coordinate system.[^ch5-footnote1]
 
   ![Figure [ndc]: Rays in camera coordinates](../images/fig-04-camera-view-space.svg)
 
-In order to determine the direction for the ray going through a pixel, we need to translate the
+In order to determine the direction for the ray targeting a pixel, we need to convert the
 pixel's viewport coordinates to the coordinate system we are going to use when computing ray
-intersections. Let's define the $x$ and $y$ coordinate span of the viewport as NDC (ranging from
-$-1$ to $1$) and let's offset that by some fixed distance along the $-z$-axis. This makes the
-viewport a square (with a width and height of 2 units) so we need to adjust it by the aspect ratio
-of the application window in order to make the shape of the viewport match our frame.
+intersections. Let's define the $x$ and $y$ coordinate span of the viewport to be the same as NDC
+(see _Figure 4_). This would make the viewport a square (with a width and height of $2$) so we need
+to adjust it by the aspect ratio of the application window in order to make its shape match the
+window frame.
 
-Our fragment shader currently normalizes the viewport pixel coordinates to the range $[0,1]$ and
-returns that as the output color. We can apply a simple transformation to map the coordinates to our
-new camera coordinate space:
+The fragment shader already normalizes the viewport pixel coordinates to the range $[0,1]$ and
+returns that as the output color. We can instead apply a simple transformation to convert them
+to our new camera coordinate space:
+
+1. Map the range to $[-1, 1]$ by shifting both coordinates in the negative direction by $0.5$ and
+   multiplying that by $2$.
+2. Flip the sign of the $y$ coordinate and scale it by the aspect ratio but leave the $x$ coordinate
+   as it is.
+
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
     ...
@@ -1685,13 +1691,47 @@ new camera coordinate space:
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift delete
       let color = pos.xy / vec2f(f32(uniforms.width - 1u), f32(uniforms.height - 1u));
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift highlight
-      let origin = vec3(0.);
-      let focus_distance = 1.;
       let aspect_ratio = f32(uniforms.width) / f32(uniforms.height);
 
-      // Map `pos` from y-down viewport coordinates to camera viewport plane coordinates.
+      // Normalize the viewport coordinates.
       var uv = pos.xy / vec2f(f32(uniforms.width - 1u), f32(uniforms.height - 1u));
-      uv = vec2(uv.x - 0.5, 0.5 - uv.y) * vec2(1., aspect_ratio);
+
+      // Map `uv` from y-down (normalized) viewport coordinates to camera coordinates.
+      uv = 2. * (uv - vec2(0.5)) * vec2(1., -aspect_ratio);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
+      ...
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [camera-ray-computation]:
+     <kbd>[shaders.wgsl]</kbd> Obtaining the viewport vector]
+
+
+We now have a vector $\vec{\mathbf{uv}}$ that spans from the center of the viewport to the pixel
+$\mathbf{P}$. The ray direction is the vector that points from the origin towards the pixel, which
+is given by $\mathbf{P} - \mathbf{O}$. $\mathbf{O}$ is equal to $(0, 0, 0)$, so computing
+$\mathbf{P}$ will give us the ray direction.
+
+If we picture the viewport to be positioned away from the origin by the distance $f$ along the $-z$
+axis then we can obtain $\mathbf{P}$ by computing
+$\begin{bmatrix} \vec{\mathbf{uv}} \\ 0 \end{bmatrix} - \begin{bmatrix} 0 \\ 0 \\ f \end{bmatrix}$,
+or simply $\begin{bmatrix} \vec{\mathbf{uv}} \\ -f \end{bmatrix}$:
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
+    ...
+    @fragment fn display_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift highlight
+      let origin = vec3(0.);
+      let focus_distance = 1.;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
+      let aspect_ratio = f32(uniforms.width) / f32(uniforms.height);
+
+      // Normalize the viewport coordinates.
+      var uv = pos.xy / vec2f(f32(uniforms.width - 1u), f32(uniforms.height - 1u));
+
+      // Map `uv` from y-down (normalized) viewport coordinates to camera coordinates.
+      uv = 2. * (uv - vec2(0.5)) * vec2(1., -aspect_ratio);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift highlight
 
       let direction = vec3(uv, -focus_distance);
       let ray = Ray(origin, direction);
@@ -1702,12 +1742,11 @@ new camera coordinate space:
     [Listing [camera-ray-computation]:
      <kbd>[shaders.wgsl]</kbd> Deriving the camera ray origin and direction]
 
-
-Now we have our camera ray but we don't have any objects in the scene for it to intersect. Initially
-we can make all rays hit the sky which will also act as our first light source. We can make the sky
-appear a little more realistic by painting it with a gradient that blends from white to blue as the
-$y$ coordinate of the ray's direction increases. We'll first map the $y$ coordinate to the $[0,1]$
-range and use that value to linearly interpolate between the two colors using the blend equation:
+We finally have our camera ray. Initially we can make all rays hit the sky which will also act as
+our light source. We can make the sky appear a little more realistic by painting it with a
+gradient that blends from white to blue as the $y$ coordinate of the ray's direction increases.
+We'll first map the $y$ coordinate to the $[0,1]$ range and use that value to linearly interpolate
+between the two colors using the blend equation:
 
   $$ \mathit{blendedValue} = (1-a)\cdot\mathit{startValue} + a\cdot\mathit{endValue} $$
 
@@ -1755,6 +1794,9 @@ Running the program now should produce an image that looks like this:
 
   ![Figure [sky]: Ray tracing the sky](../images/img-06-sky-gradient.png)
 
+
+[^ch5-footnote1]: The choice of a right-handed vs left-handed system is really up to you - you can
+pick any relative orientation for the major axes that you want, as long as you stay consistent.
 
 Sphere Intersection
 -------------------
