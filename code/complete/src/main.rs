@@ -17,7 +17,7 @@ const HEIGHT: u32 = 1200;
 
 #[pollster::main]
 async fn main() -> Result<()> {
-    let event_loop = EventLoop::new();
+    let event_loop = EventLoop::new()?;
     let window_size = winit::dpi::PhysicalSize::new(WIDTH, HEIGHT);
     let window = WindowBuilder::new()
         .with_inner_size(window_size)
@@ -29,35 +29,32 @@ async fn main() -> Result<()> {
 
     let renderer = render::PathTracer::new(device, queue, WIDTH, HEIGHT);
 
-    event_loop.run(move |event, _, control_flow| {
-        *control_flow = ControlFlow::Poll;
+    event_loop.run(|event, control_handle| {
+        control_handle.set_control_flow(ControlFlow::Poll);
         match event {
-            Event::WindowEvent { event, .. } => {
-                if event == WindowEvent::CloseRequested {
-                    *control_flow = ControlFlow::Exit;
+            Event::WindowEvent { event, .. } => match event {
+                WindowEvent::CloseRequested => control_handle.exit(),
+                WindowEvent::RedrawRequested => {
+                    // Wait for the next available frame buffer.
+                    let frame: wgpu::SurfaceTexture = surface
+                        .get_current_texture()
+                        .expect("failed to get current texture");
+
+                    let render_target = frame
+                        .texture
+                        .create_view(&wgpu::TextureViewDescriptor::default());
+
+                    renderer.render_frame(&render_target);
+
+                    frame.present();
+                    window.request_redraw();
                 }
-            }
-            Event::RedrawRequested(_) => {
-                // Wait for the next available frame buffer.
-                let frame: wgpu::SurfaceTexture = surface
-                    .get_current_texture()
-                    .expect("failed to get current texture");
-
-                let render_target = frame
-                    .texture
-                    .create_view(&wgpu::TextureViewDescriptor::default());
-
-                renderer.render_frame(&render_target);
-
-                frame.present();
-            }
-            Event::MainEventsCleared => {
-                // draw repeatedly
-                window.request_redraw();
-            }
+                _ => (),
+            },
             _ => (),
         }
-    });
+    })?;
+    Ok(())
 }
 
 async fn connect_to_gpu(window: &Window) -> Result<(wgpu::Device, wgpu::Queue, wgpu::Surface)> {
@@ -67,7 +64,7 @@ async fn connect_to_gpu(window: &Window) -> Result<(wgpu::Device, wgpu::Queue, w
     let instance = wgpu::Instance::default();
 
     // Create a drawable "surface" that is associated with the window.
-    let surface = unsafe { instance.create_surface(&window) }?;
+    let surface = instance.create_surface(window)?;
 
     // Request a GPU that is compatible with the surface. If the system has multiple GPUs then
     // pick the high performance one.
@@ -105,6 +102,7 @@ async fn connect_to_gpu(window: &Window) -> Result<(wgpu::Device, wgpu::Queue, w
         present_mode: wgpu::PresentMode::AutoVsync,
         alpha_mode: caps.alpha_modes[0],
         view_formats: vec![],
+        desired_maximum_frame_latency: 3,
     };
     surface.configure(&device, &config);
 

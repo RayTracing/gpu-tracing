@@ -190,37 +190,35 @@ and handle them as they arrive by looping indefinitely:
         },
     };
 
-    const WIDTH: u32 = 800;
-    const HEIGHT: u32 = 600;
+    const WIDTH: u32 = 1024;
+    const HEIGHT: u32 = 768;
 
     fn main() -> Result&lt()&gt {
-        let event_loop = EventLoop::new();
+        let event_loop = EventLoop::new()?;
         let window_size = winit::dpi::PhysicalSize::new(WIDTH, HEIGHT);
         let window = WindowBuilder::new()
             .with_inner_size(window_size)
+            .with_resizable(false)
             .with_title("GPU Path Tracer".to_string())
             .build(&event_loop)?;
 
         // TODO: initialize renderer
 
-        event_loop.run(move |event, _, control_flow| {
-            *control_flow = ControlFlow::Poll;
+        event_loop.run(|event, control_handle| {
+            control_handle.set_control_flow(ControlFlow::Poll);
             match event {
-                Event::WindowEvent { event, .. } => {
-                    if event == WindowEvent::CloseRequested {
-                        *control_flow = ControlFlow::Exit;
+                Event::WindowEvent { event, .. } => match event {
+                    WindowEvent::CloseRequested => control_handle.exit(),
+                    WindowEvent::RedrawRequested => {
+                        // TODO: draw frame
+                        window.request_redraw();
                     }
-                }
-                Event::RedrawRequested(_) => {
-                    // TODO: draw frame
-                }
-                Event::MainEventsCleared => {
-                    // draw repeatedly
-                    window.request_redraw();
-                }
-                _ => ()
+                    _ => (),
+                },
+                _ => (),
             }
-        });
+        })?;
+        Ok(())
     }
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     [Listing [main-initial]: <kbd>[main.rs]</kbd> Creating a window and handling window events]
@@ -245,13 +243,14 @@ The next thing the template does is establish a connection to the GPU and config
 surface manages a set of *textures* that allow the GPU to render inside the window.
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
-    async fn connect_to_gpu(window: &Window) -> Result&lt(wgpu::Device, wgpu::Queue, wgpu::Surface&gt {
+    async fn connect_to_gpu(window: &Window) -> Result<(wgpu::Device, wgpu::Queue, wgpu::Surface)> {
         use wgpu::TextureFormat::{Bgra8Unorm, Rgba8Unorm};
+
         // Create an "instance" of wgpu. This is the entry-point to the API.
         let instance = wgpu::Instance::default();
 
         // Create a drawable "surface" that is associated with the window.
-        let surface = unsafe { instance.create_surface(&window) }?;
+        let surface = instance.create_surface(window)?;
 
         // Request a GPU that is compatible with the surface. If the system has multiple GPUs then
         // pick the high performance one.
@@ -289,6 +288,7 @@ surface manages a set of *textures* that allow the GPU to render inside the wind
             present_mode: wgpu::PresentMode::AutoVsync,
             alpha_mode: caps.alpha_modes[0],
             view_formats: vec![],
+            desired_maximum_frame_latency: 3,
         };
         surface.configure(&device, &config);
 
@@ -349,14 +349,17 @@ queue has a limited number of textures available. If the CPU outpaces the GPU (i
 longer than a display refresh cycle to finish its tasks), then calling
 `surface.get_current_texture()` can block until a texture becomes available.
 
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
     #[pollster::main]
     async fn main() -> Result&lt()&gt {
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
-        let event_loop = EventLoop::new();
+        let event_loop = EventLoop::new()?;
         let window_size = winit::dpi::PhysicalSize::new(WIDTH, HEIGHT);
         let window = WindowBuilder::new()
             .with_inner_size(window_size)
+            .with_resizable(false)
             .with_title("GPU Path Tracer".to_string())
             .build(&event_loop)?;
 
@@ -367,35 +370,33 @@ longer than a display refresh cycle to finish its tasks), then calling
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
         // TODO: initialize renderer
 
-        event_loop.run(move |event, _, control_flow| {
-            *control_flow = ControlFlow::Poll;
+        event_loop.run(|event, control_handle| {
+            control_handle.set_control_flow(ControlFlow::Poll);
             match event {
                 Event::WindowEvent { event, .. } => match event {
-                    WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
+                    WindowEvent::CloseRequested => control_handle.exit(),
+                    WindowEvent::RedrawRequested => {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+                        // Wait for the next available frame buffer.
+                        let frame: wgpu::SurfaceTexture = surface
+                            .get_current_texture()
+                            .expect("failed to get current texture");
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+                        // TODO: draw frame
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+
+                        frame.present();
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+                        window.request_redraw();
+                    }
                     _ => (),
-                }
-                Event::RedrawRequested(_) => {
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
-                    // Wait for the next available frame buffer.
-                    let frame: wgpu::SurfaceTexture = surface
-                        .get_current_texture()
-                        .expect("failed to get current texture");
-
-
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
-                    // TODO: draw frame
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
-
-                    frame.present();
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
-                }
-                Event::MainEventsCleared => {
-                    // draw repeatedly
-                    window.request_redraw();
-                }
-                _ => ()
+                },
+                _ => (),
             }
-        });
+        })?;
+        Ok(())
     }
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     [Listing [main-setup-complete]: <kbd>[main.rs]</kbd> Putting together the initial main function]
