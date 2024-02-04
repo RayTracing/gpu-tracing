@@ -7,6 +7,33 @@ struct Uniforms {
 }
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
 
+struct Sphere {
+  center: vec3f,
+  radius: f32,
+}
+
+fn intersect_sphere(ray: Ray, sphere: Sphere) -> f32 {
+  let v = ray.origin - sphere.center;
+  let a = dot(ray.direction, ray.direction);
+  let b = dot(v, ray.direction);
+  let c = dot(v, v) - sphere.radius * sphere.radius;
+
+  let d = b * b - a * c;
+  if d < 0. {
+    return -1.;
+  }
+
+  let sqrt_d = sqrt(d);
+  let recip_a = 1. / a;
+
+  // Compute both possible solutions for `t` and search for the smallest positive one.
+  let t1 = (-b - sqrt_d) * recip_a;
+  let t2 = (-b + sqrt_d) * recip_a;
+  let tmin = min(t1, t2);
+  let tmax = max(t1, t2);
+  return select(tmax, tmin, tmin >= 0.);
+}
+
 struct Ray {
   origin: vec3f,
   direction: vec3f,
@@ -40,7 +67,7 @@ var<private> vertices: QuadVertices = QuadVertices(
   var uv = pos.xy / vec2f(f32(uniforms.width - 1u), f32(uniforms.height - 1u));
 
   // Map `uv` from y-down (normalized) viewport coordinates to camera coordinates.
-  uv = 2. * (uv - vec2(0.5)) * vec2(1., -aspect_ratio);
+  uv = (2. * uv - vec2(1.)) * vec2(aspect_ratio, -1.);
 
   let direction = vec3(uv, -focus_distance);
   let ray = Ray(origin, direction);

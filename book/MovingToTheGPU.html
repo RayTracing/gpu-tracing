@@ -1628,11 +1628,13 @@ point where the ray intersects the scene.
 
 A ray is a part of a straight line that has a starting point and extends infinitely in one
 direction. A ray in 3D space can be represented using two vectors: a point of origin
-$\vec{\mathbf{O}}$ and a direction $\vec{\mathbf{d}}$. All points $\mathbf{P}$ on the ray
-are described by the linear equation $\mathbf{P}(t) = \mathbf{O} + t \mathbf{d}$ over the parameter
+$\mathbf{P}$ and a direction $\vec{\mathbf{d}}$. All points $\mathbf{R}$ on the ray
+are described by the linear equation $\mathbf{R}(t) = \mathbf{P} + t \mathbf{d}$ over the parameter
 $t$. $t$ is a real number and its positive values represent points on the ray that are
-in front of the origin (if we consider the direction $\mathbf{d}$ as _forward_). Negative values
+in front of the ray origin (if we consider the direction $\mathbf{d}$ as _forward_). Negative values
 of $t$ represent points behind the origin, and $t=0$ is the same as the origin.
+
+  ![Figure [ray]: Ray definition](../images/fig-05-ray.svg)
 
 Let's define the data structure to represent a ray:
 
@@ -1642,7 +1644,7 @@ Let's define the data structure to represent a ray:
       width: u32,
       height: u32,
     }
-    @group(0) @binding(0) var<uniform> uniforms: Uniforms;
+    @group(0) @binding(0) var&ltuniform&gt uniforms: Uniforms;
 
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift highlight
@@ -1653,7 +1655,7 @@ Let's define the data structure to represent a ray:
 
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
-    alias QuadVertices = array<vec2f, 6>;
+    alias QuadVertices = array&ltvec2f, 6&gt;
     ...
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     [Listing [ray-struct]: <kbd>[shaders.wgsl]</kbd> Ray structure]
@@ -1664,10 +1666,11 @@ arriving light gets focused) as the camera's origin and this will act as the ori
 rays. The camera has a view direction, and some distance away from the origin along the view
 direction sits the 2D viewport framing the rendered image.
 
-We will initially position the camera origin at $(0, 0, 0)$ and set the view direction towards the
-$-z$-axis in a 3-dimensional right-handed cartesian coordinate system.[^ch5-footnote1]
+We will initially position the camera origin at the coordinate system origin $(0, 0, 0)$ and set the
+view direction towards the $-z$-axis in a 3-dimensional right-handed cartesian coordinate
+system.[^ch5-footnote1]
 
-  ![Figure [ndc]: Rays in camera coordinates](../images/fig-04-camera-view-space.svg)
+  ![Figure [camera-view-space]: Rays in camera coordinates](../images/fig-04-camera-view-space.svg)
 
 In order to determine the direction for the ray targeting a pixel, we need to convert the
 pixel's viewport coordinates to the coordinate system we are going to use when computing ray
@@ -1680,11 +1683,10 @@ The fragment shader already normalizes the viewport pixel coordinates to the ran
 returns that as the output color. We can instead apply a simple transformation to convert them
 to our new camera coordinate space:
 
-1. Map the range to $[-1, 1]$ by shifting both coordinates in the negative direction by $0.5$ and
-   multiplying that by $2$.
-2. Flip the sign of the $y$ coordinate and scale it by the aspect ratio but leave the $x$ coordinate
-   as it is.
-
+1. Map the range to $[-1, 1]$ by doubling the range and shifting it in the negative direction by
+   $1$.
+2. Scale the $x$ coordinate by the aspect ratio (which we'll define as $\dfrac{width}{height}$).
+3. Flip the sign of the $y$ coordinate by multiplying it by $-1$.
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
     ...
@@ -1698,7 +1700,7 @@ to our new camera coordinate space:
       var uv = pos.xy / vec2f(f32(uniforms.width - 1u), f32(uniforms.height - 1u));
 
       // Map `uv` from y-down (normalized) viewport coordinates to camera coordinates.
-      uv = 2. * (uv - vec2(0.5)) * vec2(1., -aspect_ratio);
+      uv = (2. * uv - vec2(1.)) * vec2(aspect_ratio, -1.);
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
       ...
     }
@@ -1708,14 +1710,16 @@ to our new camera coordinate space:
 
 
 We now have a vector $\vec{\mathbf{uv}}$ that spans from the center of the viewport to the pixel
-$\mathbf{P}$. The ray direction is the vector that points from the origin towards the pixel, which
-is given by $\mathbf{P} - \mathbf{O}$. $\mathbf{O}$ is equal to $(0, 0, 0)$, so computing
-$\mathbf{P}$ will give us the ray direction.
+$\mathbf{A}$. The ray direction is the vector that points from the origin towards the pixel, which
+is given by $\mathbf{A} - \mathbf{O}$. $\mathbf{O}$ is equal to $(0, 0, 0)$, so computing
+$\mathbf{A}$ will give us the ray direction.
 
-If we picture the viewport to be positioned away from the origin by the distance $f$ along the $-z$
-axis then we can obtain $\mathbf{P}$ by computing
+If we picture the viewport to be positioned away from the origin at distance $f$ along the $-z$
+axis then we can obtain $\mathbf{A}$ by computing
 $\begin{bmatrix} \vec{\mathbf{uv}} \\ 0 \end{bmatrix} - \begin{bmatrix} 0 \\ 0 \\ f \end{bmatrix}$,
-or simply $\begin{bmatrix} \vec{\mathbf{uv}} \\ -f \end{bmatrix}$:
+or simply $\begin{bmatrix} \vec{\mathbf{uv}} \\ -f \end{bmatrix}$.
+
+In the code, I'll refer to $f$ as `focus_distance`:
 
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
@@ -1731,7 +1735,7 @@ or simply $\begin{bmatrix} \vec{\mathbf{uv}} \\ -f \end{bmatrix}$:
       var uv = pos.xy / vec2f(f32(uniforms.width - 1u), f32(uniforms.height - 1u));
 
       // Map `uv` from y-down (normalized) viewport coordinates to camera coordinates.
-      uv = 2. * (uv - vec2(0.5)) * vec2(1., -aspect_ratio);
+      uv = (2. * uv - vec2(1.)) * vec2(aspect_ratio, -1.);
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift highlight
 
       let direction = vec3(uv, -focus_distance);
@@ -1743,17 +1747,16 @@ or simply $\begin{bmatrix} \vec{\mathbf{uv}} \\ -f \end{bmatrix}$:
     [Listing [camera-ray-computation]:
      <kbd>[shaders.wgsl]</kbd> Deriving the camera ray origin and direction]
 
-We finally have our camera ray. Initially we can make all rays hit the sky which will also act as
-our light source. We can make the sky appear a little more realistic by painting it with a
-gradient that blends from white to blue as the $y$ coordinate of the ray's direction increases.
+We finally have our camera ray. Initially we can make all rays hit the sky which will act as
+the light source. We can make the sky appear a little more realistic by painting it with a
+gradient that blends from blue to white as the $y$ coordinate of the ray's direction decreases.
 We'll first map the $y$ coordinate to the $[0,1]$ range and use that value to linearly interpolate
 between the two colors using the blend equation:
 
   $$ \mathit{blendedValue} = (1-a)\cdot\mathit{startValue} + a\cdot\mathit{endValue} $$
 
 Let's introduce a function called `sky_color` to compute this for a given ray and return that as the
-fragment color. I'm using the same colors as RTIOW but you could instead blend any two colors that
-you prefer:
+fragment color. I used the same colors as RTIOW but you can use different ones:[^ch5-footnote2]
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
     ...
@@ -1779,7 +1782,7 @@ you prefer:
 
       // Map `pos` from y-down viewport coordinates to camera viewport plane coordinates.
       var uv = pos.xy / vec2f(f32(uniforms.width - 1u), f32(uniforms.height - 1u));
-      uv = vec2(uv.x - 0.5, 0.5 - uv.y) * vec2(1., aspect_ratio);
+      uv = (2. * uv - vec2(1.)) * vec2(aspect_ratio, -1.);
 
       let direction = vec3(uv, -focus_distance);
       let ray = Ray(origin, direction);
@@ -1799,10 +1802,120 @@ Running the program now should produce an image that looks like this:
 [^ch5-footnote1]: The choice of a right-handed vs left-handed system is really up to you - you can
 pick any relative orientation for the major axes that you want, as long as you stay consistent.
 
+[^ch5-footnote2]: Interpolating from blue towards a reddish color instead of pure white can resemble
+twilight. Give `vec3(1., 5. 0.3)`) a try.
+
+Ray-Sphere Intersection
+-----------------------
+It's time to introduce objects to the scene. We'll start with a sphere since it has a simple
+implicit form and querying for intersections between a ray and a sphere is straightforward.
+
+Let's define a sphere by its center point $\mathbf{C}$ and its radius $r$. Then, any point
+$\mathbf{X}$ on the surface of the sphere can be described by the equation[^ch5-footnote3]
+
+  $$ (\mathbf{X} - \mathbf{C}) \cdot (\mathbf{X} - \mathbf{C}) = r^2 $$
+
+We want to determine if there is a point along the ray that satisfies this equation. Substituting
+our ray equation for $\mathbf{X}$ we get:
+
+  $$ (\mathbf{P} + t\mathbf{d} - \mathbf{C}) \cdot (\mathbf{P} + t\mathbf{d} - \mathbf{C}) = r^2 $$
+
+Now we need to solve for $t$. To simplify things, let's substitute $\mathbf{v}$ for $(\mathbf{P} -
+\mathbf{C})$. After expanding the dot product and rearranging the terms we get
+
+  $$ (\mathbf{d} \cdot \mathbf{d}) t^2 + 2 (\mathbf{v} \cdot \mathbf{d}) t +
+     (\mathbf{v} \cdot \mathbf{v}) - r^2 = 0 $$
+
+This is now in the canonical form for a quadratic equation: $at^2 + bt + c = 0$ and the solutions
+for $t$ are given by
+
+  $$ t = \dfrac{-b \pm\sqrt{b^2 - ac}}{a} $$
+
+with $a = \mathbf{d}\cdot\mathbf{d}$, $b = (\mathbf{P}-\mathbf{C})\cdot\mathbf{d}$, and
+$c = (\mathbf{P}-\mathbf{C})\cdot(\mathbf{P}-\mathbf{C}) - r^2$. The value of the discriminant
+$b^2 - ac$ determines the number of solutions. If the discriminant is negative, then there
+are no real solutions and thus no intersection. If the discriminant is exactly 0, then there is one
+real solution where the ray tangentially intersects the sphere at that point. If the discriminant is
+positive, then there are two real solutions and thus two potential intersections that we need to
+consider.
+
+  ![Figure [ray-sphere-solutions]:
+    Different cases of ray-sphere intersection](../images/fig-06-ray-sphere-solutions.svg)
+
+When there are two possible intersections, it makes sense to return the one that's closest to the
+ray origin. We also want to make sure that the intersection lies in front of the origin (the closer
+one might be behind the origin if the ray is being cast from inside the sphere).
+
+Let's define a new function called `intersect_sphere`. This function will return the smaller
+positive solution for $t$ if there is an intersection and a negative value if the ray misses the
+sphere. Let's also define a new type called `Sphere` to represent the object:
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift highlight
+    struct Sphere {
+      center: vec3f,
+      radius: f32,
+    }
+
+    fn intersect_sphere(ray: Ray, sphere: Sphere) -> f32 {
+      let v = ray.origin - sphere.center;
+      let a = dot(ray.direction, ray.direction);
+      let b = dot(v, ray.direction);
+      let c = dot(v, v) - sphere.radius * sphere.radius;
+
+      let d = b * b - a * c;
+      if d < 0. {
+        return -1.;
+      }
+
+      let sqrt_d = sqrt(d);
+      let recip_a = 1. / a;
+
+      // Compute both possible solutions for `t` and search for the smallest positive one.
+      let t1 = (-b - sqrt_d) * recip_a;
+      let t2 = (-b + sqrt_d) * recip_a;
+      let tmin = min(t1, t2);
+      let tmax = max(t1, t2);
+      return select(tmax, tmin, tmin >= 0.);
+    }
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
+    struct Ray {
+      origin: vec3f,
+      direction: vec3f,
+    }
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [camera-ray-computation]:
+     <kbd>[shaders.wgsl]</kbd> Deriving the camera ray origin and direction]
+
+Our function first computes both solutions and sorts them in increasing order (`tmin` and `tmax`).
+`select`[^ch5-footnote4] is a WGSL builtin function that returns the second argument if the third
+argument evaluates to true.[^ch5-footnote5] If the smaller value `tmin` is negative, then the
+function will return the other value. If both solutions are negative then the function will return
+a negative value and the calling code will treat that case as _no intersection_.
+
+
+[^ch5-footnote3]: This equation has an intuitive geometric interpretation. $\mathbf{X} - \mathbf{C}$
+describes a vector that spans from the center of the sphere to its surface. We know that the
+magnitude of this vector must be equal to $r$. The dot product of a vector with itself yields the
+square of its magnitude (as $V \cdot V = V_x^2 + V_y^2 + V_z^2)$ which, in this case, must be equal
+to $r^2$.
+
+[^ch5-footnote4]: https://www.w3.org/TR/WGSL/#select-builtin
+
+[^ch5-footnote5]: `select(tmax, tmin, tmin >= 0.)` could be translated to C++ as a ternary
+expression `tmin >= 0. ? tmin : tmax`. This is not a precise translation since ternary expressions
+in C++ are subject to short-circuiting while `select` is a function and all of its arguments must be
+evaluated when it gets called.
+
 
 References
 ==========
 [^foley-vandam]: J.F. Hughes, A. van Dam, M. McGuire, D.F. Sklar, J.D. Foley, S.K. Feiner, K. Akeley *Computer Graphics: Principles and Practice, 3rd Edition, Section 1.6*
+[^ericson]: C. Ericson, Real Time Collision Detection
 
 [Arman Uguray]:       https://github.com/armansito
 [Steve Hollasch]:     https://github.com/hollasch
