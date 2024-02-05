@@ -1842,12 +1842,13 @@ consider.
   ![Figure [ray-sphere-solutions]:
     Different cases of ray-sphere intersection](../images/fig-06-ray-sphere-solutions.svg)
 
-When there are two possible intersections, it makes sense to return the one that's closest to the
-ray origin. We also want to make sure that the intersection lies in front of the origin (the closer
-one might be behind the origin if the ray is being cast from inside the sphere).
+When there are two possible intersections, it makes sense to choose the one that's closer to the
+ray origin. If the closer result is negative (i.e. it's located _behind_ the origin relative to the
+ray direction -- this can happen if the origin is inside the sphere), we'll discard that
+intersection and try the other one.
 
 Let's define a new function called `intersect_sphere`. This function will return the smaller
-positive solution for $t$ if there is an intersection and a negative value if the ray misses the
+non-negative solution for $t$ if there is an intersection and a negative value if the ray misses the
 sphere. Let's also define a new type called `Sphere` to represent the object:
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
@@ -1871,13 +1872,12 @@ sphere. Let's also define a new type called `Sphere` to represent the object:
 
       let sqrt_d = sqrt(d);
       let recip_a = 1. / a;
-
-      // Compute both possible solutions for `t` and search for the smallest positive one.
-      let t1 = (-b - sqrt_d) * recip_a;
-      let t2 = (-b + sqrt_d) * recip_a;
-      let tmin = min(t1, t2);
-      let tmax = max(t1, t2);
-      return select(tmax, tmin, tmin >= 0.);
+      let mb = -b;
+      let t = (mb - sqrt_d) * recip_a;
+      if t >= 0. {
+        return t;
+      }
+      return (mb + sqrt_d) * recip_a;
     }
 
 
@@ -1888,14 +1888,45 @@ sphere. Let's also define a new type called `Sphere` to represent the object:
     }
     ...
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    [Listing [camera-ray-computation]:
-     <kbd>[shaders.wgsl]</kbd> Deriving the camera ray origin and direction]
+    [Listing [ray-sphere-intersection]:
+     <kbd>[shaders.wgsl]</kbd> The `intersect_sphere` function]
 
-Our function first computes both solutions and sorts them in increasing order (`tmin` and `tmax`).
-`select`[^ch5-footnote4] is a WGSL builtin function that returns the second argument if the third
-argument evaluates to true.[^ch5-footnote5] If the smaller value `tmin` is negative, then the
-function will return the other value. If both solutions are negative then the function will return
-a negative value and the calling code will treat that case as _no intersection_.
+
+The calling code will treat all negative results as no intersection. Let's now add a single sphere
+to the scene. We'll first test the sphere for an intersection with the camera ray. If there is an
+intersection, then the we'll return a solid color for the pixel. Otherwise, we'll return the color
+of the sky as before. Let's also make sure that the sphere is far enough away so that the camera
+doesn't fall inside the sphere:
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
+    ...
+    @fragment fn display_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+      let origin = vec3(0.);
+      let focus_distance = 1.;
+      let aspect_ratio = f32(uniforms.width) / f32(uniforms.height);
+
+      // Map `pos` from y-down viewport coordinates to camera viewport plane coordinates.
+      var uv = pos.xy / vec2f(f32(uniforms.width - 1u), f32(uniforms.height - 1u));
+      uv = (2. * uv - vec2(1.)) * vec2(aspect_ratio, -1.);
+
+      let direction = vec3(uv, -focus_distance);
+      let ray = Ray(origin, direction);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift highlight
+      let sphere = Sphere(/*center*/ vec3(0., 0., -1), /*radius*/ 0.5);
+      if intersect_sphere(ray, sphere) > 0. {
+        return vec4(1., 0.76, 0.03, 1.);
+      }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
+      return vec4(sky_color(ray), 1.);
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [single-sphere]:
+     <kbd>[shaders.wgsl]</kbd> First intersection test]
+
+This should render a solid circle that looks like this:
+
+  ![Figure [yello-circle]: A solid circle](../images/img-07-solid-circle.png)
+
 
 
 [^ch5-footnote3]: This equation has an intuitive geometric interpretation. $\mathbf{X} - \mathbf{C}$
@@ -1904,12 +1935,7 @@ magnitude of this vector must be equal to $r$. The dot product of a vector with 
 square of its magnitude (as $V \cdot V = V_x^2 + V_y^2 + V_z^2)$ which, in this case, must be equal
 to $r^2$.
 
-[^ch5-footnote4]: https://www.w3.org/TR/WGSL/#select-builtin
 
-[^ch5-footnote5]: `select(tmax, tmin, tmin >= 0.)` could be translated to C++ as a ternary
-expression `tmin >= 0. ? tmin : tmax`. This is not a precise translation since ternary expressions
-in C++ are subject to short-circuiting while `select` is a function and all of its arguments must be
-evaluated when it gets called.
 
 
 References
