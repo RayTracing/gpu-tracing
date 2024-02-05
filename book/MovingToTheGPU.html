@@ -1808,7 +1808,8 @@ twilight. Give `vec3(1., 5. 0.3)`) a try.
 Ray-Sphere Intersection
 -----------------------
 It's time to introduce objects to the scene. We'll start with a sphere since it has a simple
-implicit form and querying for intersections between a ray and a sphere is straightforward.
+implicit form and querying for intersections between a ray and a sphere is straightforward. I'll
+quickly go over the mathematics of the intersection function that we are going to implement:
 
 Let's define a sphere by its center point $\mathbf{C}$ and its radius $r$. Then, any point
 $\mathbf{X}$ on the surface of the sphere can be described by the equation[^ch5-footnote3]
@@ -1826,7 +1827,7 @@ Now we need to solve for $t$. To simplify things, let's substitute $\mathbf{v}$ 
   $$ (\mathbf{d} \cdot \mathbf{d}) t^2 + 2 (\mathbf{v} \cdot \mathbf{d}) t +
      (\mathbf{v} \cdot \mathbf{v}) - r^2 = 0 $$
 
-This is now in the canonical form for a quadratic equation: $at^2 + bt + c = 0$ and the solutions
+This is now in a canonical form for a quadratic equation: $at^2 + 2bt + c = 0$ and the solutions
 for $t$ are given by
 
   $$ t = \dfrac{-b \pm\sqrt{b^2 - ac}}{a} $$
@@ -1845,7 +1846,7 @@ consider.
 When there are two possible intersections, it makes sense to choose the one that's closer to the
 ray origin. If the closer result is negative (i.e. it's located _behind_ the origin relative to the
 ray direction -- this can happen if the origin is inside the sphere), we'll discard that
-intersection and try the other one.
+intersection and choose the other one.
 
 Let's define a new function called `intersect_sphere`. This function will return the smaller
 non-negative solution for $t$ if there is an intersection and a negative value if the ray misses the
