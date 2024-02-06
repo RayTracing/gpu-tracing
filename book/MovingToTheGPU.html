@@ -1911,7 +1911,7 @@ doesn't fall inside the sphere:
       let ray = Ray(origin, direction);
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift highlight
       let sphere = Sphere(/*center*/ vec3(0., 0., -1), /*radius*/ 0.5);
-      if intersect_sphere(ray, sphere) > 0. {
+      if intersect_sphere(ray, sphere) >= 0. {
         return vec4(1., 0.76, 0.03, 1.);
       }
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
