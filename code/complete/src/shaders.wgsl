@@ -27,7 +27,7 @@ fn intersect_sphere(ray: Ray, sphere: Sphere) -> f32 {
   let recip_a = 1. / a;
   let mb = -b;
   let t = (mb - sqrt_d) * recip_a;
-  if t >= 0. {
+  if t > 0. {
     return t;
   }
   return (mb + sqrt_d) * recip_a;
@@ -71,7 +71,7 @@ var<private> vertices: QuadVertices = QuadVertices(
   let direction = vec3(uv, -focus_distance);
   let ray = Ray(origin, direction);
   let sphere = Sphere(/*center*/ vec3(0., 0., -1), /*radius*/ 0.5);
-  if intersect_sphere(ray, sphere) >= 0. {
+  if intersect_sphere(ray, sphere) > 0. {
     return vec4(1., 0.76, 0.03, 1.);
   }
   return vec4(sky_color(ray), 1.);

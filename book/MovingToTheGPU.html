@@ -187,10 +187,10 @@ and handle them as they arrive by looping indefinitely:
         },
     };
 
-    const WIDTH: u32 = 1024;
-    const HEIGHT: u32 = 768;
+    const WIDTH: u32 = 800;
+    const HEIGHT: u32 = 600;
 
-    fn main() -> Result&lt()&gt {
+    fn main() -> Result<()> {
         let event_loop = EventLoop::new()?;
         let window_size = winit::dpi::PhysicalSize::new(WIDTH, HEIGHT);
         let window = WindowBuilder::new()
@@ -350,7 +350,7 @@ longer than a display refresh cycle to finish its tasks), then calling
     ...
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
     #[pollster::main]
-    async fn main() -> Result&lt()&gt {
+    async fn main() -> Result<()> {
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
         let event_loop = EventLoop::new()?;
         let window_size = winit::dpi::PhysicalSize::new(WIDTH, HEIGHT);
@@ -413,7 +413,7 @@ A `Result` is a variant type that can hold either a success (`Ok`) value or an e
 The types of the `Ok` and `Err` variants are generic:
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
-    pub enum Result&ltT, E&gt {
+    pub enum Result<&#xFEFF;T, E> {
         Ok(T),
         Err(E),
     }
@@ -448,9 +448,9 @@ Rust provides the `?` operator to automatically unpack a `Result` and return ear
 error. A Rust version of the C program above could be written like this:
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
-    fn function_with_result() -> Result&ltFoo, FooError&gt {...}
+    fn function_with_result() -> Result<&#xFEFF;Foo, FooError> {...}
 
-    fn caller() -> Result&lt(), FooError&gt {
+    fn caller() -> Result<(), FooError> {
         let foo: Foo = function_with_result()?;
 
         // ...do something with `foo`...
@@ -465,9 +465,9 @@ the same error type or types with a known conversion. There are various other wa
 error:
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
-    fn function_with_result() -> Result&ltFoo, FooError&gt {...}
+    fn function_with_result() -> Result<&#xFEFF;Foo, FooError> {...}
 
-    fn caller() -> Result&lt(), BarError&gt {
+    fn caller() -> Result<(), FooError> {
         ...
         if let Err(e) = function_with_result() {
             println!("got a foo error: {:?}", e);
@@ -491,12 +491,12 @@ error:
 
 I like to keep things simple in my code examples and use the `?` operator. Instead of defining
 custom error types and conversions, I use a catch all `Error` type from a library called *anyhow*.
-You'll often see the examples include `anyhow::Result` (an alias for `Result&ltT, anyhow::Error&gt`)
-and `anyhow::Context`. The latter is useful for adding an error message while converting to an
-`anyhow::Error`:
+You'll often see the examples include `anyhow::Result` (an alias for `Result<&#xFEFF, anyhow::Error>`)
+and `anyhow::Context`. The latter is a useful trait for adding an error message while converting to
+an `anyhow::Error`:
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
-    fn caller() -> anyhow::Result&lt()&gt {
+    fn caller() -> anyhow::Result<()> {
         let foo: Foo = function_with_result().context("failed to get foo")?;
 
         // ...do something with `foo`...
@@ -749,7 +749,7 @@ code.[^ch3-footnote2]
 Let's define the vertex and fragment functions, which I'm calling `display_vs` and `display_fs`:
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift highlight
-    alias TriangleVertices = array&ltvec2f, 3>;
+    alias TriangleVertices = array<&#xFEFF;vec2f, 3>;
     var<private> vertices: TriangleVertices = TriangleVertices(
       vec2f(-0.5, -0.5),
       vec2f( 0.5, -0.5),
@@ -1060,13 +1060,13 @@ the entire viewport regardless of its dimensions.
 
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift delete 
-    alias TriangleVertices = array&ltvec2f, 3>;
+    alias TriangleVertices = array<&#xFEFF;vec2f, 3>;
     var<private> vertices: TriangleVertices = TriangleVertices(
       vec2f(-0.5, -0.5),
       vec2f( 0.5, -0.5),
       vec2f( 0.0,  0.5),
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift highlight
-    alias QuadVertices = array&ltvec2f, 6>;
+    alias TriangleVertices = array<&#xFEFF;vec2f, 6>;
     var<private> vertices: TriangleVertices = TriangleVertices(
       vec2f(-1.0,  1.0),
       vec2f(-1.0, -1.0),
@@ -1421,7 +1421,7 @@ Now, let's allocate the backing buffer object and initialize its contents:
             };
             let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("uniforms"),
-                size: std::mem::size_of::&ltUniforms&gt() as u64,
+                size: std::mem::size_of::<&#xFEFF;Uniforms>() as u64,
                 usage: wgpu::BufferUsages::UNIFORM,
                 mapped_at_creation: true,
             });
@@ -1641,7 +1641,7 @@ Let's define the data structure to represent a ray:
       width: u32,
       height: u32,
     }
-    @group(0) @binding(0) var&ltuniform&gt uniforms: Uniforms;
+    @group(0) @binding(0) var<uniform> uniforms: Uniforms;
 
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift highlight
@@ -1652,7 +1652,7 @@ Let's define the data structure to represent a ray:
 
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
-    alias QuadVertices = array&ltvec2f, 6&gt;
+    alias QuadVertices = array<&#xFEFF;vec2f, 6>;
     ...
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     [Listing [ray-struct]: <kbd>[shaders.wgsl]</kbd> Ray structure]
