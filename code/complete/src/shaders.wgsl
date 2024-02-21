@@ -1,6 +1,8 @@
 // Originally written in 2023 by Arman Uguray <arman.uguray@gmail.com>
 // SPDX-License-Identifier: CC-BY-4.0
 
+const FLT_MAX: f32 = 3.40282346638528859812e+38;
+
 struct Uniforms {
   width: u32,
   height: u32,
@@ -43,8 +45,15 @@ fn sky_color(ray: Ray) -> vec3f {
   return (1. - t) * vec3(1.) + t * vec3(0.3, 0.5, 1.);
 }
 
-alias QuadVertices = array<vec2f, 6>;
-var<private> vertices: QuadVertices = QuadVertices(
+const OBJECT_COUNT: u32 = 2;
+alias Scene = array<Sphere, OBJECT_COUNT>;
+var<private> scene: Scene = Scene(
+  Sphere(/*center*/ vec3(0., 0., -1.), /*radius*/ 0.5),
+  Sphere(/*center*/ vec3(0., -100.5, -1.), /*radius*/ 100.),
+);
+
+alias TriangleVertices = array<vec2f, 6>;
+var<private> vertices: TriangleVertices = TriangleVertices(
   vec2f(-1.0,  1.0),
   vec2f(-1.0, -1.0),
   vec2f( 1.0,  1.0),
@@ -70,9 +79,15 @@ var<private> vertices: QuadVertices = QuadVertices(
 
   let direction = vec3(uv, -focus_distance);
   let ray = Ray(origin, direction);
-  let sphere = Sphere(/*center*/ vec3(0., 0., -1), /*radius*/ 0.5);
-  if intersect_sphere(ray, sphere) > 0. {
-    return vec4(1., 0.76, 0.03, 1.);
+  var closest_t = FLT_MAX;
+  for (var i = 0u; i < OBJECT_COUNT; i += 1u) {
+    let t = intersect_sphere(ray, scene[i]);
+    if t > 0. && t < closest_t {
+      closest_t = t;
+    }
+  }
+  if closest_t < FLT_MAX {
+    return vec4(1., 0.76, 0.03, 1.) * saturate(1. - closest_t);
   }
   return vec4(sky_color(ray), 1.);
 }

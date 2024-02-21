@@ -1652,7 +1652,7 @@ Let's define the data structure to represent a ray:
 
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
-    alias QuadVertices = array<&#xFEFF;vec2f, 6>;
+    alias TriangleVertices = array<&#xFEFF;vec2f, 6>;
     ...
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     [Listing [ray-struct]: <kbd>[shaders.wgsl]</kbd> Ray structure]
@@ -1840,13 +1840,20 @@ consider.
   ![Figure [ray-sphere-solutions]:
     Different cases of ray-sphere intersection](../images/fig-06-ray-sphere-solutions.svg)
 
-When there are two possible intersections, it makes sense to choose the one that's closer to the
-ray origin. If the closer result is negative (i.e. it's located _behind_ the origin relative to the
-ray direction -- this can happen if the origin is inside the sphere), we'll discard that
-intersection and choose the other one.
+We are looking for the first visible surface in the ray's "line of sight", so when there are two
+possible intersections it makes sense to choose the one that's closer to the ray's origin and lies
+in front of it. If the closer result is negative (i.e. it's located _behind_ the origin relative to
+the ray direction), we can discard it and choose the other one. If that one is non-negative, then
+the ray origin is inside the sphere, so the intersection is valid. If both results are negative,
+then the sphere is "behind" the ray.
+
+$t$ is $0$ when the ray origin is on the surface. In general, rays that start exactly on the
+surface of an object will be rays that trace the paths of light arriving at that surface. We
+generally don't want such a ray to intersect the geometry that the ray originates from, so for
+simplicity let's only consider positive values of $t$ as a valid intersection.
 
 Let's define a new function called `intersect_sphere`. This function will return the smaller
-non-negative solution for $t$ if there is an intersection and a negative value if the ray misses the
+positive solution for $t$ if there is an intersection and a non-positive value if the ray misses the
 sphere. Let's also define a new type called `Sphere` to represent the object:
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
@@ -1872,7 +1879,7 @@ sphere. Let's also define a new type called `Sphere` to represent the object:
       let recip_a = 1. / a;
       let mb = -b;
       let t = (mb - sqrt_d) * recip_a;
-      if t >= 0. {
+      if t > 0. {
         return t;
       }
       return (mb + sqrt_d) * recip_a;
@@ -1890,11 +1897,10 @@ sphere. Let's also define a new type called `Sphere` to represent the object:
      <kbd>[shaders.wgsl]</kbd> The `intersect_sphere` function]
 
 
-The calling code will treat all negative results as no intersection. Let's now add a single sphere
-to the scene. We'll first test the sphere for an intersection with the camera ray. If there is an
-intersection, then the we'll return a solid color for the pixel. Otherwise, we'll return the color
-of the sky as before. Let's also make sure that the sphere is far enough away so that the camera
-doesn't fall inside the sphere:
+Let's now add a single sphere to the scene. First we'll test the sphere for an intersection with
+the camera ray. If there is a hit, then we'll return a solid color for the pixel.
+If not, we'll return the color of the sky as before. Let's also make sure that the sphere is far
+enough away from the view origin so that the camera doesn't fall inside the sphere:
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
     ...
@@ -1911,7 +1917,7 @@ doesn't fall inside the sphere:
       let ray = Ray(origin, direction);
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift highlight
       let sphere = Sphere(/*center*/ vec3(0., 0., -1), /*radius*/ 0.5);
-      if intersect_sphere(ray, sphere) >= 0. {
+      if intersect_sphere(ray, sphere) > 0. {
         return vec4(1., 0.76, 0.03, 1.);
       }
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
@@ -1923,7 +1929,8 @@ doesn't fall inside the sphere:
 
 This should render a solid circle that looks like this:
 
-  ![Figure [yello-circle]: A solid circle](../images/img-07-solid-circle.png)
+  ![Figure [yellow-circle]: A solid circle](../images/img-07-solid-circle.png)
+
 
 
 [^ch5-footnote3]: This equation has an intuitive geometric interpretation. $\mathbf{X} - \mathbf{C}$
@@ -1932,6 +1939,157 @@ magnitude of this vector must be equal to $r$. The dot product of a vector with 
 square of its magnitude (as $V \cdot V = V_x^2 + V_y^2 + V_z^2)$ which, in this case, must be equal
 to $r^2$.
 
+Shading Multiple Spheres
+------------------------
+Now that our sphere intersection code is working, we'll next generalize the ray casting logic to
+look for intersections in a _scene_ containing multiple objects. We can initially represent the
+scene as an array of spheres. We'll change the code to test all spheres for a possible hit and use
+the closest intersection to color the pixel. As before, we'll use the $t$ parameter to determine the
+nearest hit.
+
+Let's declare the scene with a second (large) sphere that serves as the "ground" where our first
+sphere will sit. We can declare the array as a private global, like we did for the vertices of the
+full-screen quad:
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift highlight
+    const OBJECT_COUNT: u32 = 2;
+    alias Scene = array<&#xFEFF;Sphere, OBJECT_COUNT>;
+    var<private> scene: Scene = Scene(
+      Sphere(/*center*/ vec3(0., 0., -1.), /*radius*/ 0.5),
+      Sphere(/*center*/ vec3(0., -100.5, -1.), /*radius*/ 100.),
+    );
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
+    alias TriangleVertices = array<&#xFEFF;vec2f, 6>;
+    var<private> vertices: TriangleVertices = TriangleVertices(
+      vec2f(-1.0,  1.0),
+      vec2f(-1.0, -1.0),
+      vec2f( 1.0,  1.0),
+      vec2f( 1.0,  1.0),
+      vec2f(-1.0, -1.0),
+      vec2f( 1.0, -1.0),
+    );
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [scene-array]: <kbd>[shaders.wgsl]</kbd> Hard-coded scene declaration]
+
+
+The scene traversal code is straightforward: loop through the scene array and keep track of the
+closest $t$ value that results from calling `intersect_sphere` on each element. It makes sense to
+initialize $t$ with a value that is larger than all other possible values. Since we're dealing with
+floating-point numbers, _infinity_ is a suitable initial value. However, since WGSL doesn't quite
+support infinities[^ch5-footnote4], I'll use the largest representable `f32` value as a substitute:
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift highlight
+    const FLT_MAX: f32 = 3.40282346638528859812e+38;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
+    ...
+    const OBJECT_COUNT: u32 = 2;
+    alias Scene = array<&#xFEFF;Sphere, OBJECT_COUNT>;
+    var<private> scene: Scene = Scene(
+      Sphere(/*center*/ vec3(0., 0., -1.), /*radius*/ 0.5),
+      Sphere(/*center*/ vec3(0., -100.5, -1.), /*radius*/ 100.),
+    );
+    ...
+    @fragment fn display_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+      let origin = vec3(0.);
+      let focus_distance = 1.;
+      let aspect_ratio = f32(uniforms.width) / f32(uniforms.height);
+
+      // Map `pos` from y-down viewport coordinates to camera viewport plane coordinates.
+      var uv = pos.xy / vec2f(f32(uniforms.width - 1u), f32(uniforms.height - 1u));
+      uv = (2. * uv - vec2(1.)) * vec2(aspect_ratio, -1.);
+
+      let direction = vec3(uv, -focus_distance);
+      let ray = Ray(origin, direction);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift delete
+      let sphere = Sphere(/*center*/ vec3(0., 0., -1), /*radius*/ 0.5);
+      if intersect_sphere(ray, sphere) > 0. {
+        return vec4(1., 0.76, 0.03, 1.);
+      }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift highlight
+      var closest_t = FLT_MAX;
+      for (var i = 0u; i < OBJECT_COUNT; i += 1u) {
+        let t = intersect_sphere(ray, scene[i]);
+        if t > 0. && t < closest_t {
+          closest_t = t;
+        }
+      }
+      if closest_t < FLT_MAX {
+        return vec4(1., 0.76, 0.03, 1.);
+      }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
+      return vec4(sky_color(ray), 1.);
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [single-sphere]: <kbd>[shaders.wgsl]</kbd> Simple scene traversal]
+
+
+This should result in the following image:
+
+  ![Figure [yellow-circles]: Two solid circles](../images/img-08-two-solid-circles.png)
+
+Both spheres are visible where we expect them. Since we're painting both objects with the same
+solid color, it's not possible to tell if our code works correctly for the bottom half of the top
+sphere where the ray intersects both objects.
+An easy way to improve this is to assign each object a different solid color and use that to paint
+the pixel. I'm going to do something different: I'll scale the color by the value of `closest_t`
+such that intersections that are further away from the origin are shaded darker compared to those
+that are closer. This will convey the _depth_ of the shaded object with respect to our virtual
+camera.
+
+We can achieve this by multiplying the color by a factor of $1 - t$ which will keep the color bright
+for smaller values of $t$ (representing closer intersections) and darken it as $t$ grows. I'll use
+the `saturate` built-in function to clamp the resulting value to the $[0, 1]$ range so that values
+of $t$ that are larger than $1$ will be shaded black:
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
+    ...
+    @fragment fn display_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+      let origin = vec3(0.);
+      let focus_distance = 1.;
+      let aspect_ratio = f32(uniforms.width) / f32(uniforms.height);
+
+      // Map `pos` from y-down viewport coordinates to camera viewport plane coordinates.
+      var uv = pos.xy / vec2f(f32(uniforms.width - 1u), f32(uniforms.height - 1u));
+      uv = (2. * uv - vec2(1.)) * vec2(aspect_ratio, -1.);
+
+      let direction = vec3(uv, -focus_distance);
+      let ray = Ray(origin, direction);
+      var closest_t = FLT_MAX;
+      for (var i = 0u; i < OBJECT_COUNT; i += 1u) {
+        let t = intersect_sphere(ray, scene[i]);
+        if t > 0. && t < closest_t {
+          closest_t = t;
+        }
+      }
+      if closest_t < FLT_MAX {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift highlight
+        return vec4(1., 0.76, 0.03, 1.) * saturate(1. - closest_t);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
+      }
+      return vec4(sky_color(ray), 1.);
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [shading-using-depth]: <kbd>[shaders.wgsl]</kbd> Shading using depth]
+
+
+This should make the objects' order of visibility and their spherical shape more apparent:
+
+  ![Figure [depth-shaded-spheres]: Spheres shaded by depth](../images/img-09-depth-shaded-spheres.png)
+
+Both spheres appear quite dark and the bottom sphere fades to black where it meets the one on top.
+This makes sense since the center of the top sphere is exactly where $t = 1$. You could play with
+different ways to map `closest_t` to a color to achieve different results. Visualizing depth in this
+way can be a useful debugging tool in general.
+
+
+[^ch5-footnote4]: [WGSL W3C Working Draft, §14.6. Floating Point Evaluation](https://www.w3.org/TR/WGSL/#floating-point-evaluation)
+states that "_Overflow, infinities, and NaNs generated before runtime are errors_" and "_[compiler]
+implementations may assume that overflow, infinities, and NaNs are not present at runtime._"
 
 
                                (insert acknowledgments.md.html here)
