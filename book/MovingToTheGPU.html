@@ -2,7 +2,7 @@
 <link rel="icon" type="image/png" href="../favicon.png">
 <!-- Markdeep: https://casual-effects.com/markdeep/ -->
 
-                                  **Ray Tracing: Moving to the GPU**
+                                **A Friendly Guide to GPU Ray Tracing**
                                            [Arman Uguray][]
                                                 <br>
                                                 Draft
@@ -81,7 +81,7 @@ examples should be easy to adapt to those libraries. I avoided using ray tracing
 [DXR][dxr] or [Vulkan Ray Tracing][vkrt]) to show you how to implement similar functionality on
 your own.
 
-<!-- TODO: Maybe this is better to list in a references section at the bottom -->
+<!-- TODO: Maybe this is better to list in a references section near the bottom -->
 If you're looking to implement this in CUDA, you may also be interested in Roger Allen's
 [blog post][rtiow-cuda] titled _Accelerated Ray Tracing in One Weekend in CUDA_.
 
@@ -2043,8 +2043,9 @@ camera.
 
 We can achieve this by multiplying the color by a factor of $1 - t$ which will keep the color bright
 for smaller values of $t$ (representing closer intersections) and darken it as $t$ grows. I'll use
-the `saturate` built-in function to clamp the resulting value to the $[0, 1]$ range so that values
-of $t$ that are larger than $1$ will be shaded black:
+the [**`saturate`**](https://www.w3.org/TR/WGSL/#saturate-float-builtin) built-in function to clamp
+the resulting value to the $[0, 1]$ range so that values of $t$ that are larger than $1$ will be
+shaded black:
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
     ...
@@ -2082,14 +2083,206 @@ This should make the objects' order of visibility and their spherical shape more
   ![Figure [depth-shaded-spheres]: Spheres shaded by depth](../images/img-09-depth-shaded-spheres.png)
 
 Both spheres appear quite dark and the bottom sphere fades to black where it meets the one on top.
-This makes sense since the center of the top sphere is exactly where $t = 1$. You could play with
-different ways to map `closest_t` to a color to achieve different results. Visualizing depth in this
-way can be a useful debugging tool in general.
+This makes sense since the center of the top sphere is exactly where $t = 1$. You can play with
+different ways to convert `closest_t` to a color. Here is a version that paints the scene gray and
+brighter with increasing depth:
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
+      ...
+      if closest_t < FLT_MAX {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift highlight
+        return vec4(saturate(closest_t) * 0.5);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
+      }
+      return vec4(sky_color(ray), 1.);
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [shading-using-depth-alt]: <kbd>[shaders.wgsl]</kbd> Another way to shade with depth]
+
+  ![Figure [depth-shaded-spheres-gray]:
+    Spheres shaded by depth (gray)](../images/img-10-depth-shaded-spheres-gray.png)
 
 
 [^ch5-footnote4]: [WGSL W3C Working Draft, §14.6. Floating Point Evaluation](https://www.w3.org/TR/WGSL/#floating-point-evaluation)
 states that "_Overflow, infinities, and NaNs generated before runtime are errors_" and "_[compiler]
 implementations may assume that overflow, infinities, and NaNs are not present at runtime._"
+
+Surface Normals
+---------------
+Shading using depth can serve as a great debugging tool as well as the basis for various visual
+effects. However, we need to know more about the surface geometry in order to color it with a
+lighting model. This includes its orientation with respect to our viewing direction and the rest of
+the scene, which is given by its _normal vector_.
+
+For any point on a surface, the normal $\vec{\mathbf{N}}$ is defined by the line that is
+perpendicular to the plane tangent at that point.
+
+  ![Figure [normal-vector]: The normal vector](../images/fig-07-normal-vector.svg)
+
+The orientation of the normal vector depends on both the type of geometry as well as the specific
+point of intersection. Let's first settle on the following conventions (which will come into play
+later while evaluating materials):
+
+1. Every surface has a _front_ face and a _back_ face and the direction of the normal vector lines
+   up with the front face.
+2. All normal vectors have a unit length by default.
+
+The normal vector at point $\mathbf{X}$ on the surface of a sphere with center $\mathbf{C}$ and
+radius $r$ is simply given by
+
+  $$ \vec{\mathbf{N}} = \dfrac{\mathbf{X} - \mathbf{C}}{||\mathbf{X} - \mathbf{C}||}
+     = \dfrac{\mathbf{X} - \mathbf{C}}{r} $$
+
+  ![Figure [sphere-normal]:
+    Computing the normal on a sphere](../images/fig-08-sphere-normal.svg)
+
+Now that we know how to compute the normal, let's change `intersect_sphere` to return a normal
+vector alongside the $t$ parameter. We'll introduce a struct called `Intersection` that bundles
+them together:
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
+    ...
+    @group(0) @binding(0) var<uniform> uniforms: Uniforms;
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift highlight
+
+    struct Intersection {
+      normal: vec3f,
+      t: f32,
+    }
+
+    fn no_intersection() -> Intersection {
+      return Intersection(vec3(0.), -1.);
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
+
+    struct Sphere {
+    ...
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift highlight
+    fn intersect_sphere(ray: Ray, sphere: Sphere) -> Intersection {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
+      let v = ray.origin - sphere.center;
+      let a = dot(ray.direction, ray.direction);
+      let b = dot(v, ray.direction);
+      let c = dot(v, v) - sphere.radius * sphere.radius;
+
+      let d = b * b - a * c;
+      if d < 0. {
+        return no_intersection();
+      }
+
+      let sqrt_d = sqrt(d);
+      let recip_a = 1. / a;
+      let mb = -b;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift highlight
+      let t1 = (mb - sqrt_d) * recip_a;
+      let t2 = (mb + sqrt_d) * recip_a;
+      let t = select(t2, t1, t1 > 0.);
+      if t <= 0. {
+        return no_intersection();
+      }
+
+      let p = point_on_ray(ray, t);
+      let N = (p - sphere.center) / sphere.radius;
+      return Intersection(N, t);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
+    }
+
+    struct Ray {
+      origin: vec3f,
+      direction: vec3f,
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift highlight
+
+    fn point_on_ray(ray: Ray, t: f32) -> vec3<f32> {
+      return ray.origin + t * ray.direction;
+    }
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
+
+    fn sky_color(ray: Ray) -> vec3f {
+      let t = 0.5 * (normalize(ray.direction).y + 1.);
+      return (1. - t) * vec3(1.) + t * vec3(0.3, 0.5, 1.);
+    }
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [intersection-struct]: <kbd>[shaders.wgsl]</kbd> A struct for intersection data]
+
+
+Let's talk about some of the changes. We added a helper function called `no_intersection()` that
+returns an `Intersection` representing a null result. We also declared a function called
+`point_on_ray`, which returns the coordinates of a point along a ray at a known $t$ value.
+
+You may have noticed that the if statement which used to be conditioned on `t > 0.` is now a
+function call to _select_. [**`select`**](https://www.w3.org/TR/WGSL/#select-builtin) evaluates to
+either its first or second argument depending on the value of the third. The call
+`select(t2, t1, t1 > 0.)` is functionally equivalent to `t1 > 0. ? t1 : t2` (a ternary expression)
+in C/C++, with one exception: there is no guarantee of short-circuiting, meaning that both `t1` and
+`t2` will be evaluated regardless of the conditional. You may be tempted to rewrite this as an if
+statement (why needlessly evaluate both branches after all?):
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
+      var t = (mb - sqrt_d) * recip_a;
+      if t <= 0. {
+        t = (mb + sqrt_d) * recip_a;
+      }
+      if t <= 0. {
+        return no_intersection();
+      }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [branchy-version]: <kbd>[shaders.wgsl]</kbd> Branchy version]
+
+This is perfectly fine and will behave in the same way. In fact, it's possible that this will
+compile down to the exact same GPU instructions as the version with `select`. GPUs are generally not
+good at handling conditional branches in code without sacrificing some amount of parallelism and a
+shader compiler may decide to eliminate branches altogether for simple statements like these.
+
+Let's update the fragment shader to make use of the new data structure. Let's also change our
+shading code to visualize the normal vector by mapping the coordinates (from the $[-1, 1]$ range)
+to a color value (in the $[0, 1]$ range):
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
+    ...
+    @fragment fn display_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+      let origin = vec3(0.);
+      let focus_distance = 1.;
+      let aspect_ratio = f32(uniforms.width) / f32(uniforms.height);
+
+      // Normalize the viewport coordinates.
+      var uv = pos.xy / vec2f(f32(uniforms.width - 1u), f32(uniforms.height - 1u));
+
+      // Map `uv` from y-down (normalized) viewport coordinates to camera coordinates.
+      uv = (2. * uv - vec2(1.)) * vec2(aspect_ratio, -1.);
+
+      let direction = vec3(uv, -focus_distance);
+      let ray = Ray(origin, direction);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift highlight
+      var closest_hit = Intersection(vec3(0.), FLT_MAX);
+      for (var i = 0u; i < OBJECT_COUNT; i += 1u) {
+        let hit = intersect_sphere(ray, scene[i]);
+        if hit.t > 0. && hit.t < closest_hit.t {
+          closest_hit = hit;
+        }
+      }
+      if closest_hit.t < FLT_MAX {
+        return vec4(0.5 * closest_hit.normal + vec3(0.5), 1.);
+      }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
+      return vec4(sky_color(ray), 1.);
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [shading-with-normals]: <kbd>[shaders.wgsl]</kbd> Shading with normals]
+
+and we get:
+
+  ![Figure [normal-shaded-spheres]:
+    Visualizing surface normals](../images/img-11-normal-shaded-spheres.png)
+
+Notice how each color channel maps directly to one of the major axis coordinates, so that normals
+pointing towards the $+x$ direction get shaded with a higher _red_ component, normals pointing
+straight up towards $+y$ appear green, and so on.
 
 
                                (insert acknowledgments.md.html here)
