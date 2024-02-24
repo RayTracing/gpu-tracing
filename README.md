@@ -62,7 +62,28 @@ library used by the code examples) has
 
 Building and Running
 --------------------
-TODO
+You can use the standard Rust package manager `cargo` to compile and run the code. First, make sure
+you have installed the latest version of the Rust toolchain (see [instructions][install-rust]). Then
+run the following in your terminal (inside the directory containing the source code):
+
+To run a debug build:
+```shell
+$ cargo run
+```
+
+To run an optimized build:
+```shell
+$ cargo run --release
+```
+
+If you want to run this on macOS with Apple Silicon, you may want to consider running without x86-64
+emulation:
+
+```shell
+$ rustup target add aarch64-apple-darwin
+$ cargo run --release --target aarch64-apple-darwin
+```
+
 
 Corrections & Contributions
 ----------------------------
@@ -80,3 +101,4 @@ text at [LICENSE][]
 [cc-by]: http://creativecommons.org/licenses/by/4.0/
 [cc-by-image]: https://i.creativecommons.org/l/by/4.0/88x31.png
 [cc-by-shield]: https://img.shields.io/badge/License-CC%20BY%204.0-lightgrey.svg
+[install-rust]: https://www.rust-lang.org/tools/install
