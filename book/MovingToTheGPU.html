@@ -1682,7 +1682,7 @@ to our new camera coordinate space:
 
 1. Map the range to $[-1, 1]$ by doubling the range and shifting it in the negative direction by
    $1$.
-2. Scale the $x$ coordinate by the aspect ratio (which we'll define as $\dfrac{width}{height}$).
+2. Scale the $x$ coordinate by the aspect ratio (which we'll define as $\tfrac{width}{height}$).
 3. Flip the sign of the $y$ coordinate by multiplying it by $-1$.
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
@@ -2120,8 +2120,8 @@ perpendicular to the plane tangent at that point.
   ![Figure [normal-vector]: The normal vector](../images/fig-07-normal-vector.svg)
 
 The orientation of the normal vector depends on both the type of geometry as well as the specific
-point of intersection. Let's first settle on the following conventions (which will come into play
-later while evaluating materials):
+point of intersection. First we're going to make some assumptions that will come into play later
+when we implement materials:
 
 1. Every surface has a _front_ face and a _back_ face and the direction of the normal vector lines
    up with the front face.
@@ -2238,6 +2238,8 @@ This is perfectly fine and will behave in the same way. In fact, it's possible t
 compile down to the exact same GPU instructions as the version with `select`. GPUs are generally not
 good at handling conditional branches in code without sacrificing some amount of parallelism and a
 shader compiler may decide to eliminate branches altogether for simple statements like these.
+Writing efficient GPU code requires a good understanding of how GPUs deal with divergent control flow
+-- a topic that we will discuss more later on.
 
 Let's update the fragment shader to make use of the new data structure. Let's also change our
 shading code to visualize the normal vector by mapping the coordinates (from the $[-1, 1]$ range)
@@ -2283,6 +2285,37 @@ and we get:
 Notice how each color channel maps directly to one of the major axis coordinates, so that normals
 pointing towards the $+x$ direction get shaded with a higher _red_ component, normals pointing
 straight up towards $+y$ appear green, and so on.
+
+
+Temporal Accumulation
+====================================================================================================
+Over the next two chapters we are going to focus on two important features of the renderer:
+antialiasing and path tracing. These are both sampling problems in essence: they try to estimate
+some continuous signal (in this case the light flowing out of the scene into the pixels of our
+virtual camera) by repeatedly sampling various discrete light paths. Once a sufficient number of
+samples have been collected, we hope that their average will converge to the real signal -- or at
+least get close enough.
+
+How many samples do we need to collect for each pixel before displaying the result? How can we
+structure the code to achieve some amount of interactivity?
+
+The answer to the first question depends highly on the scene but the sample count we are looking at
+is possibly in the hundreds if not _thousands_. One option is to add a loop to our fragment shader
+that intersects the scene with camera rays thousands of times before returning the final color,
+though it will take a long time before we can display a frame. Path tracing is computationally
+_very_ expensive, even for a GPU.
+
+I'm going to suggest an alternative approach: spread the sample collection across many frames.
+An invocation of the pipeline will output 1 sample per pixel (as it currently does) but rather
+than outputting the samples directly to the display surface, we'll accumulate them in a texture over
+time.
+
+This approach has the nice benefit that we can to present the contents of the texture to the display
+as soon as a pipeline invocation completes, allowing us to watch the image resolve to the final
+rendering.
+
+Let's start by making a few small changes to the design of the renderer before we tackle
+antialiasing.
 
 
                                (insert acknowledgments.md.html here)
