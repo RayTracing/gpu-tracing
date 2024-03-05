@@ -1036,7 +1036,7 @@ from our windowing event loop, using the current surface texture as the render t
         });
     }
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    [Listing [render_frame-call]: <kbd>[render.rs]</kbd> Rendering to a surface texture]
+    [Listing [render_frame-call]: <kbd>[main.rs]</kbd> Rendering to a surface texture]
 
 Running this code should bring up a window that looks like this:
 
@@ -2294,7 +2294,7 @@ antialiasing and path tracing. These are both sampling problems in essence: they
 some continuous signal (in this case the light flowing out of the scene into the pixels of our
 virtual camera) by repeatedly sampling various discrete light paths. Once a sufficient number of
 samples have been collected, we hope that their average will converge to the real signal -- or at
-least get close enough.
+least get close enough.[^ch6-footnote1]
 
 How many samples do we need to collect for each pixel before displaying the result? How can we
 structure the code to achieve some amount of interactivity?
@@ -2311,11 +2311,304 @@ than outputting the samples directly to the display surface, we'll accumulate th
 time.
 
 This approach has the nice benefit that we can to present the contents of the texture to the display
-as soon as a pipeline invocation completes, allowing us to watch the image resolve to the final
+as soon as a pipeline invocation completes, allowing us to watch as the image resolves to the final
 rendering.
 
-Let's start by making a few small changes to the design of the renderer before we tackle
-antialiasing.
+[^ch6-footnote1]: This is referred to as the
+[_Law of Large Numbers_](https://en.wikipedia.org/wiki/Law_of_large_numbers) in probability theory.
+The Monte Carlo method employed in path tracing is an example of this (and we'll talk more about it
+in later chapters).
+
+Frame Count
+-----------
+The arithmetic average of a set of samples is simply given by their sum divided by the sample count.
+In other words, given $N$ samples of a random variable $x \in x_1,...,x_N$ the average is given by
+
+  $$ \dfrac{1}{N}\sum_{i=1}^N x_i $$
+
+Since we are going to distribute the samples across rendered frames, for any given frame, $N$ is
+equal to the number of frames we have rendered up that point plus $1$. We can represent this as a
+simple counter that we increment every time `render_frame` gets called. We'll also define a uniform
+variable for the frame count so that our shader program can access it when it needs to compute the
+average:
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
+    ...
+    struct Uniforms {
+      width: u32,
+      height: u32,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift highlight
+      frame_count: u32,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
+    }
+    @group(0) @binding(0) var<uniform> uniforms: Uniforms;
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [frame-count-cpu]: <kbd>[shaders.wgsl]</kbd> The `frame_count` uniform declaration]
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+    #[derive(Copy, Clone, Pod, Zeroable)]
+    #[repr(C)]
+    struct Uniforms {
+        width: u32,
+        height: u32,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        frame_count: u32,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    }
+
+    impl PathTracer {
+        pub fn new(device: wgpu::Device, queue: wgpu::Queue) -> PathTracer {
+            device.on_uncaptured_error(Box::new(|error| {
+                panic!("Aborting due to an error: {}", error);
+            }));
+
+            let shader_module = compile_shader_module(&device);
+            let (display_pipeline, display_layout) =
+                create_display_pipeline(&device, &shader_module);
+
+            // Initialize the uniform buffer.
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+            let uniforms = Uniforms {
+                width: 800,
+                height: 600,
+                frame_count: 0,
+            };
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+            let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            ...
+        }
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust delete
+        pub fn render_frame(&self, target: &wgpu::TextureView) {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        pub fn render_frame(&mut self, target: &wgpu::TextureView) {
+            self.uniforms.frame_count += 1;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+            ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [frame-count-cpu]: <kbd>[render.rs]</kbd> Initializing the `frame_count` uniform]
+
+We declared `frame_count` as a 32-bit unsigned integer, which is supported by all shading languages.
+This will inevitably overflow if you leave the application running for a long time but I'm not too
+worried. Consider this: if you have a powerful graphics card that can render frames at 1000 fps, it
+will take approximately 50 days for the count to reach the maximum representable `u32` value
+($2^{32}-1$). This is not perfect but also not a huge issue for us.[^ch6-footnote2] Note that we
+also changed `render_frame` to take a `&mut self` since it now mutates a member of the `PathTracer`
+type. We also need to update the call site and declare the `PathTracer` instance as mutable to make
+the compiler happy:
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+    #[pollster::main]
+    async fn main() -> Result<()> {
+        ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust delete
+        let renderer = render::PathTracer::new(device, queue);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        let mut renderer = render::PathTracer::new(device, queue);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+        ...
+    }
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [render_frame-call]: <kbd>[main.rs]</kbd> Rendering to a surface texture]
+
+We are now maintaining a count on the CPU but we still need to make sure that the changes are
+mirrored on the GPU side by writing the contents of `self.uniforms` to `self.uniform_buffer`. Since
+we are modifying `self.uniforms` every frame, we should also update the contents of the GPU buffer
+every frame. This is where things can get a little complicated.
+
+[^ch6-footnote2]: Rust has overflow checks enabled in debug builds, so the program will always panic
+(i.e. assert and crash) on overflow. In release builds, the checks are disabled by default and Rust
+performs two's complement wrapping (see the
+[docs](https://doc.rust-lang.org/book/ch03-02-data-types.html#integer-overflow)). If you don't care
+about the runtime cost and want to play it safe, you can use one of the explicit arithmetic methods
+provided by the standard library. For example, the following will always panic in the case of an
+overflow: `self.uniforms.frame_count = self.uniforms.frame_count.checked_add(1).unwrap()`.
+
+### Buffer Updates
+There are some things to consider when modifying the contents of a GPU buffer. The first
+is the type of memory the buffer resides in. GPUs typically come in two flavors: a _discrete_ GPU
+(such as a desktop graphics card) has its own dedicated memory and connects to the CPU via a
+peripheral bus that facilitates memory transfers between the two processors. In a _unified_
+architecture, the GPU and the CPU are integrated into the same die and can share system memory
+without an explicit memory transfer.
+
+Before any writes can occur, the CPU side must have access to a region of memory that's mapped to
+its address space. How the written data is made available to the GPU side very much depends on the
+hardware and the functions provided by the graphics API. For example, both Metal and Vulkan support
+buffer types that are backed by shared system memory and can be permanently mapped on a unified
+architecture. Similarly, both APIs provide facilities to transfer buffer data to GPU memory when
+fast shared memory isn't supported.[^ch6-footnote3]
+
+Another consideration is around synchronization. Suppose that we changed our renderer to allow
+multiple frames to be in flight without gating the GPU submissions on v-sync.[^ch6-footnote4] We
+would need to avoid making any changes to the uniform buffer while a GPU submission is in progress,
+as that could cause a data race. There are different ways to handle this depending on the API,
+such as double or triple buffering when using a persistently mapped buffer or using synchronization
+primitives like memory fences.
+
+If you're following this book using a native API (like Metal, Vulkan, D3D, CUDA, etc), please
+consult its documentation for the best approach for frequent buffer updates on your GPU.
+
+WebGPU tries to provide a common abstraction over these nuances while working within
+additional constraints imposed by a web browser environment.[^ch6-footnote5]
+As a result, WebGPU imposes some strict limitations on how buffer mapping works:
+
+* A buffer must have the [`MAP_WRITE`](https://www.w3.org/TR/webgpu/#dom-gpubufferusage-map_write)
+  usage for the CPU side to map and write its contents and this usage can only be combined with the
+  [`COPY_SRC`](https://www.w3.org/TR/webgpu/#dom-gpubufferusage-copy_src) usage. This means that
+  a buffer we map for writing connot be bound as a shader resource (such as a uniform buffer) and
+  instead serves as a _staging buffer_ for a _copy command_. Updating the contents of a buffer
+  is only possible by issuing a copy from this intermediate staging buffer.
+
+* Buffers can only be mapped asynchronously and there is no synchronous way to map a buffer
+  _except_ when first created (using the `mapped_at_creation` field in the buffer descriptor). This
+  requires some careful coordination so that buffers are mapped and available for writing when we
+  need to update them.
+
+This immediately rules out shared memory buffers so we have to issue a copy. The easiest way would
+be to create a new staging buffer on every update and set `mapped_at_creation` to `true` but
+allocating a new short-lived buffer every frame can be expensive and we should strive to reuse GPU
+buffers when we can. Buffers have to get unmapped before they can be bound to a shader, so we need
+to re-map a buffer before we can write to it again. A buffer can only get re-mapped asynchronously,
+so we may need to allocate another staging buffer if `render_frame` ever gets called before the
+asynchronous mapping of the first staging buffer has completed.
+
+One possible approach is to maintain a pool of staging buffers. Each of these is a
+`wgpu::Buffer` object with the `MAP_WRITE` and `COPY_SRC` usages and mapped at creation.
+When it's time to update the uniform buffer, we do the following:
+
+1. Find a large enough staging buffer in the pool (or create a new one if not found). Assume the
+   buffer is mapped and write its contents.
+
+2. Unmap the buffer and move it to a "pending buffer" list. Then, encode a
+   ["copy buffer to buffer"](https://www.w3.org/TR/webgpu/#dom-gpucommandencoder-copybuffertobuffer)
+   command with the staging buffer as the source and the uniform buffer as the destination.
+
+3. After submitting the command buffer, call
+   ["map async"](https://www.w3.org/TR/webgpu/#dom-gpubuffer-mapasync) on all buffers in the pending
+   list. The [wgpu implementation of map async](https://docs.rs/wgpu/latest/wgpu/struct.BufferSlice.html#method.map_async)
+   reports its completion in a callback (which runs asynchronously), so the callback can be
+   responsible for removing the buffer from the pending list and adding it back to the mapped
+   staging buffer pool.
+
+This is a relatively simple state machine but fortunately there is a method that boils
+all of that down to a single API call:
+[`wgpu::Queue::write_buffer`](https://docs.rs/wgpu/latest/wgpu/struct.Queue.html#method.write_buffer)[^ch6-footnote6].
+This simplifies the code quite a bit so let's use it instead of implementing a buffer pool.
+`write_buffer` achieves the same thing while leaving it up to wgpu to choose the most
+efficient way to transfer the data on the host platform.
+
+As for synchronization, everything gets internally handled by wgpu so there isn't anything special
+we need to do. As long as we call `write_buffer` before encoding any other GPU commands referencing
+the copy destination (i.e. our uniform buffer) on the same queue, the copy is guaranteed
+to complete before the shader runs and reads from the buffer:
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+    #[derive(Copy, Clone, Pod, Zeroable)]
+    #[repr(C)]
+    struct Uniforms {
+        width: u32,
+        height: u32,
+        frame_count: u32,
+    }
+
+    impl PathTracer {
+        pub fn new(device: wgpu::Device, queue: wgpu::Queue) -> PathTracer {
+            device.on_uncaptured_error(Box::new(|error| {
+                panic!("Aborting due to an error: {}", error);
+            }));
+
+            let shader_module = compile_shader_module(&device);
+            let (display_pipeline, display_layout) =
+                create_display_pipeline(&device, &shader_module);
+
+            // Initialize the uniform buffer.
+            let uniforms = Uniforms {
+                width: 800,
+                height: 600,
+                frame_count: 0,
+            };
+            let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("uniforms"),
+                size: std::mem::size_of::<Uniforms>() as u64,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+            });
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust delete
+            uniform_buffer
+                .slice(..)
+                .get_mapped_range_mut()
+                .copy_from_slice(bytemuck::bytes_of(&uniforms));
+            uniform_buffer.unmap();
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+        }
+
+        pub fn render_frame(&mut self, target: &wgpu::TextureView) {
+            self.uniforms.frame_count += 1;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+            self.queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&self.uniforms));
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+            ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [queue-write-buffer]: <kbd>[render.rs]</kbd> Updating the uniform buffer every frame]
+
+
+That's pretty much it. Since the new code always updates the uniform buffer before a GPU submission
+we don't really need to initialize it at the start. Let's check that the code works by creating
+a visual effect using `frame_count`. The count increases monotonically, so we can use it like a
+"timestamp" and drive a simple animation. Here is a simple shader change that makes the spheres
+shrink and expand:
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
+    ...
+    @fragment fn display_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+      ...
+      var closest_hit = Intersection(vec3(0.), FLT_MAX);
+      for (var i = 0u; i < OBJECT_COUNT; i += 1u) {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift highlight
+        var sphere = scene[i];
+        sphere.radius += sin(f32(uniforms.frame_count) * 0.02) * 0.2;
+        let hit = intersect_sphere(ray, sphere);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
+        if hit.t > 0. && hit.t < closest_hit.t {
+          closest_hit = hit;
+        }
+      }
+      if closest_hit.t < FLT_MAX {
+        return vec4(0.5 * closest_hit.normal + vec3(0.5), 1.);
+      }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Swift
+      return vec4(sky_color(ray), 1.);
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [shading-with-normals]: <kbd>[shaders.wgsl]</kbd> Shading with normals]
+
+This should create an effect like the one in this video (Figure 21):
+
+  ![Figure [animated-radius]:
+    (video) Spheres animated with frame count](../images/vid-01-animated-radius.mp4 autoplay muted loop)
+
+[^ch6-footnote3]: Metal provides a
+["managed"](https://developer.apple.com/documentation/metal/resource_fundamentals/synchronizing_a_managed_resource)
+storage mode for these situations alongside a "private" storage mode for memory that is meant for
+fast GPU-only access. Vulkan's memory abstraction also provides many similar low level
+configurations.
+
+[^ch6-footnote4]: This can be desirable on a high-end GPU that can render a single frame much faster
+than the display refresh rate.
+
+[^ch6-footnote5]: See [wgpu#1438](https://github.com/gfx-rs/wgpu/discussions/1438) for an
+interesting discussion on the motivations behind the async-only buffer mapping API.
+
+[^ch6-footnote6]: See the WebGPU spec
+[GPUQueue.writeBuffer](https://www.w3.org/TR/webgpu/#dom-gpuqueue-writebuffer)
 
 
                                (insert acknowledgments.md.html here)
