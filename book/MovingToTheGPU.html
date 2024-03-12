@@ -10,52 +10,52 @@
 
 Introduction
 ====================================================================================================
-_Ray Tracing_ is a rendering method that simulates the flow of light. It can faithfully recreate a
-variety of optical phenomena and can be used to render photorealistic images. It is one of the
-foundational techniques in Computer Graphics used to model light transport.
+_Ray Tracing_ is a rendering method in Computer Graphics that simulates the flow of light.
+It can accurately recreate a variety of optical phenomena and be used to render photorealistic images.
 
-_Path tracing_ is an application of this approach in order to compute _Global Illumination_. Its
+_Path tracing_ is an application of this approach, which is used to compute _Global Illumination_. Its
 core idea is to repeatedly trace millions of random rays through the scene and bounce them off
-objects based on surface properties. The algorithm is remarkably simple and it is relatively easy
-to build a basic path tracer that supports a small number of material and geometry types. Peter
-Shirley's [_Ray Tracing In One Weekend_][RTIOW] shows you how to get started with a CPU path tracer
+objects based on surface properties. The algorithm is remarkably simple and relatively easy
+to build a basic path tracer, which supports a small number of material and geometry types. Peter
+Shirley's [_Ray Tracing In One Weekend_][RTIOW] (RTIOW) shows you how to get started with a CPU path tracer
 in a quick and enjoyable way.
 
-A big challenge with path tracing is its high computational cost. Rendering a complex scene takes a
-long time and this get worse as complexity increases. This has historically made path
+A challenge with path tracing is its high computational cost. Rendering a complex scene takes a
+long time and grows worse as complexity increases. This has historically made path
 tracing unsuitable for real-time applications. Fortunately -- like many problems in Computer
-Graphics -- the algorithm lends itself very well to parallelism and it is possible to achieve a
-significant speedup by distributing the work across many processor cores. This brings us to GPUs.
+Graphics -- the algorithm lends itself very well to parallelism. It is possible to achieve a
+significant speedup by distributing the work across many processor cores. This brings us to
+the Graphics Processing Unit (GPU).
 
-The GPU (Graphics Processing Unit) is a type of processor designed to run the same set of oparations
+The GPU is a type of processor designed to run the same set of operations
 over large amounts of data in parallel. This parallelism has been instrumental to achieving
 realistic visuals in real-time applications like video games. GPUs were traditionally used to
-accelerate _scanline rasterization_ but they have since become programmable and capable of running
-a variety of parallel workloads. Notably, dedicated hardware cores to accelerate ray tracing are
-becoming more common in modern GPUs.
+accelerate _scanline rasterization_ but have since become programmable and capable of running
+a variety of parallel workloads. Notably, some modern GPUs are dedicating hardware cores to
+accelerated ray tracing.
 
-GPUs aren't without limitations. Targeting a GPU requires you to program in a way that is different
-from how you would typically approach a CPU program. Taking full advantage of the hardware requires
-very careful tuning based on its architecture and capabilities (which can vary widely across GPU
-vendors and models). Rendering fully path-traced scenes at real-time rates remains elusive even on
-the most high-end GPUs and is an active and vibrant area of research.
+GPUs aren't without limitations. Targeting a GPU requires a different approach than a typical CPU program.
+Taking full advantage of GPU hardware requires careful tuning based on its architecture and integrated
+capabilities (which can vary widely across vendors and models). Rendering fully path-traced scenes at
+real-time rates remains elusive, even on the most high-end GPUs. This is an active and vibrant area of
+Computer Graphics research.
 
 This book is an introduction to GPU programming by building a simple GPU accelerated path tracer.
 We'll focus on building a renderer that can produce high quality and correct images using a fairly
-simple design. It won't be full-featured and its performance will be limited but it will expose you
-to several fundamental GPU programming concepts. The renderer you'll have built by the end can serve
+simple design. It won't be full-featured and its performance will be limited, however it will expose you
+to several fundamental concepts of GPU programming. By the end, the renderer you have built can serve
 as a great starting point for extensions and experiments with more advanced GPU techniques. We will
 avoid most optimizations in favor of simplicity but the renderer will be able to achieve interactive
 frame rates on a decent GPU.[^ch1]
 
-The book follows a similar progression to [_Ray Tracing In One Weekend_][RTIOW]. I cover some of
+This book follows a similar progression to [_Ray Tracing In One Weekend_][RTIOW]. I cover some of
 the same material but I highly recommend completing _RTIOW_ before embarking on building
-the GPU version since doing so will teach you the path tracing algorithm in a much more approachable
+the GPU version. Doing so will teach you the path tracing algorithm in a much more approachable
 way and it will make you appreciate both the advantages and challenges of moving to a GPU-based
 architecture.
 
 If you run into any problems with your implementation, have general questions or corrections, or
-would like to share own ideas or work, check out [the GitHub Discussions forum][discussions].
+would like to share your own ideas or work, check out [the GitHub Discussions forum][discussions].
 
 
 [^ch1]: A BVH-accelerated implementation can render a version of the RTIOW cover scene with ~32,000
@@ -68,16 +68,16 @@ GPU APIs
 Interfacing with a GPU and writing programs for it typically requires the use of a special API. This
 interface depends on your operating system and GPU vendor. You often have various options depending
 on the capabilities you want. For example, an application that wants to get the most juice out of a
-NVIDIA GPU for general purpose computations may choose to target CUDA, while a developer who prefers
+NVIDIA GPU for general purpose computations may choose to target CUDA. A developer who prefers
 broad hardware compatibility for a graphical mobile game may choose OpenGL ES or Vulkan. Direct3D
-(D3D) is the main graphics API on Microsoft platforms while Metal is the preferred framework on
-systems from Apple. Vulkan, D3D12, and Metal even support an API specifically to accelerate ray
+(D3D) is the main graphics API on Microsoft platforms, while Metal is the preferred framework on
+Apple systems. Vulkan, D3D12, and Metal all support an API specifically to accelerate ray
 tracing.
 
-You can implement this book using any API or framework that you prefer, though I generally assume
-that you are working with a graphics API. In my examples I use an API based on [WebGPU][webgpu]
-which I think maps well to all modern graphics APIs like Metal, Vulkan, and D3D12. The code
-examples should be easy to adapt to those libraries. I avoided using ray tracing APIs (such as
+You can implement this book using any API or framework you prefer, though I generally assume
+you are working with a graphics API. In my examples I use an API based on [WebGPU][webgpu],
+which I think maps well to all modern graphics APIs (Metal, Vulkan, and D3D12). The code
+examples should be easy to adapt to those libraries. I avoid using ray tracing APIs (such as
 [DXR][dxr] or [Vulkan Ray Tracing][vkrt]) to show you how to implement similar functionality on
 your own.
 
@@ -87,8 +87,8 @@ If you're looking to implement this in CUDA, you may also be interested in Roger
 
 Example Code
 ------------
-Like _Ray Tracing In One Weekend_, you'll find code examples throughout the book. I use [Rust][] as
-the driving language but you can choose any language that supports your GPU API of choice. I avoid
+Like _RTIOW_, you'll find code examples throughout the book. I use [Rust][] as
+the implementation language but you can choose any language that supports your GPU API of choice. I avoid
 most esoteric aspects of Rust to keep the code easily understandable to a large audience. On the few
 occasions where I had to resort to a potentially unfamiliar Rust-ism, I provide a C example to add
 clarity.
@@ -100,7 +100,7 @@ amount of setup code for the windowing logic to help get you started.
 
 ### A note on Rust, Libraries, and APIs
 
-I chose Rust for this project because of its ease of use and portability. It also happens to be the
+I chose Rust for this project because of its ease of use and portability. It is also the
 language that I tend to be most productive in.
 
 An important aspect of Rust is that a lot of common functionality is provided by libraries outside
@@ -113,31 +113,30 @@ following:
 
   wgpu also has [native bindings in other languages](https://github.com/gfx-rs/wgpu-native).
 
-* I use [*winit*](https://docs.rs/winit/latest/winit/) which is a portable windowing library. I use
-  it to view the rendered image in real-time and to make the example code interactive.
+* I use [*winit*](https://docs.rs/winit/latest/winit/) which is a portable windowing library. Used
+  to view the rendered image in real-time and make the example code interactive.
 
 * For ease of Rust development I use [*anyhow*](https://docs.rs/anyhow/latest/anyhow/) and
   [*bytemuck*](https://docs.rs/bytemuck/latest/bytemuck/). *anyhow* is a popular error handling
   utility and integrates seamlessly. *bytemuck* provides a safe abstraction for the equivalent of
-  `reinterpret_cast` in C++, which normally requires [`unsafe`][rust-unsafe] Rust. I use it to
+  `reinterpret_cast` in C++, which normally requires [`unsafe`][rust-unsafe] Rust. It's used to
   bridge CPU data types with their GPU equivalents.
 
 * Lastly, I use [*pollster*](https://docs.rs/pollster/latest/pollster/) to execute asynchronous
   wgpu API functions (which is only called from a single line).
 
-[wgpu][] is the most important dependency as it defines how the example code  interacts with the
+[wgpu][] is the most important dependency as it defines how the example code interacts with the
 GPU. Every GPU API is different but their abstractions for the general concepts used in this book
 are fairly similar. I will highlight these differences occasionally where they matter.
 
 A large portion of the example code runs on the GPU. Every graphics API defines a programming
 language -- a so called **shading language** -- for authoring GPU programs. wgpu is based on WebGPU,
-as such my GPU code examples are written in the *WebGPU Shading Language* (WGSL)[^ch1.2.1].
+as such my GPU code examples are written in *WebGPU Shading Language* (WGSL)[^ch1.2.1].
 <!-- Have GLSL examples too? -->
 
-The [wgpu API documentation](https://docs.rs/wgpu/latest/wgpu/) and the
-[WebGPU](https://www.w3.org/TR/webgpu/) and [WGSL](https://www.w3.org/TR/WGSL/) specifications are
-great references to keep handy when you're
-developing.
+The [wgpu API documentation](https://docs.rs/wgpu/latest/wgpu/), 
+[WebGPU](https://www.w3.org/TR/webgpu/), and [WGSL](https://www.w3.org/TR/WGSL/) specifications are
+great references to keep handy when you're developing.
 
 With all of that out of the way, let's get started!
 
