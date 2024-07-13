@@ -631,26 +631,23 @@ Next, let's declare the `render` module and initialize a `PathTracer` in the `ma
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
 
         event_loop.run(move |event, _, control_flow| {
-            *control_flow = ControlFlow::Poll;
+            control_handle.set_control_flow(ControlFlow::Poll);
             match event {
                 Event::WindowEvent { event, .. } => match event {
-                    WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
+                    WindowEvent::CloseRequested => control_handle.exit(),
+                    WindowEvent::RedrawRequested => {
+                        // Wait for the next available frame buffer.
+                        let frame: wgpu::SurfaceTexture = surface
+                            .get_current_texture()
+                            .expect("failed to get current texture");
+
+                        // TODO: draw frame
+
+                        frame.present();
+                        window.request_redraw();
+                    }
                     _ => (),
                 },
-                Event::RedrawRequested(_) => {
-                    // Wait for the next available frame buffer.
-                    let frame: wgpu::SurfaceTexture = surface
-                        .get_current_texture()
-                        .expect("failed to get current texture");
-
-                    // TODO: draw frame
-
-                    frame.present();
-                }
-                Event::MainEventsCleared => {
-                    // draw repeatedly
-                    window.request_redraw();
-                }
                 _ => (),
             }
         });
