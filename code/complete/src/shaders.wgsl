@@ -150,11 +150,13 @@ fn sky_color(ray: Ray) -> vec3f {
   return (1. - t) * vec3(1.) + t * vec3(0.3, 0.5, 1.);
 }
 
-const OBJECT_COUNT: u32 = 2;
+const OBJECT_COUNT: u32 = 4;
 alias Scene = array<Sphere, OBJECT_COUNT>;
 var<private> scene: Scene = Scene(
-  Sphere(/*center*/ vec3(0., 0., -1.), /*radius*/ 0.5, /*color*/ vec3(0.5, 0.4, 0.)),
-  Sphere(/*center*/ vec3(0., -100.5, -1.), /*radius*/ 100., /*color*/ vec3(0.7, 0.4, 0.6)),
+  Sphere(/*center*/ vec3(1., 0., -1.), /*radius*/ 0.5, /*color*/ vec3(0.5, 0.4, 0.)),
+  Sphere(/*center*/ vec3(-1., 0., -1.), /*radius*/ 0.5, /*color*/ vec3(0.2, 0.5, 0.2)),
+  Sphere(/*center*/ vec3(0., -1.1, -1.), /*radius*/ 0.5, /*color*/ vec3(0.7, 0.4, 0.6)),
+  Sphere(/*center*/ vec3(0.,  1.1, -1.), /*radius*/ 0.5, /*color*/ vec3(0.2, 0.2, 1.)),
 );
 
 @group(0) @binding(1) var radiance_samples_old: texture_2d<f32>;

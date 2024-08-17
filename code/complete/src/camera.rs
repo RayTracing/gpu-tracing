@@ -1,7 +1,10 @@
 // Originally written in 2024 by Arman Uguray <arman.uguray@gmail.com>
 // SPDX-License-Identifier: CC-BY-4.0
 
-use bytemuck::{Pod, Zeroable};
+use {
+    bytemuck::{Pod, Zeroable},
+    std::f32::consts::{FRAC_PI_2, PI},
+};
 
 use crate::algebra::Vec3;
 
@@ -20,25 +23,31 @@ pub struct CameraUniforms {
 
 pub struct Camera {
     uniforms: CameraUniforms,
+    center: Vec3,
+    up: Vec3,
+    distance: f32,
+    azimuth: f32,
+    altitude: f32,
 }
 
 impl Camera {
-    pub fn look_at(origin: Vec3, center: Vec3, up: Vec3) -> Camera {
-        let w = (center - origin).normalized();
-        let u = w.cross(&up).normalized();
-        let v = u.cross(&w);
-        Camera {
-            uniforms: CameraUniforms {
-                origin,
-                _pad0: 0,
-                u,
-                _pad1: 0,
-                v,
-                _pad2: 0,
-                w,
-                _pad3: 0,
-            },
-        }
+    pub fn with_spherical_coords(
+        center: Vec3,
+        up: Vec3,
+        distance: f32,
+        azimuth: f32,
+        altitude: f32,
+    ) -> Camera {
+        let mut camera = Camera {
+            uniforms: CameraUniforms::zeroed(),
+            center,
+            up,
+            distance,
+            azimuth,
+            altitude,
+        };
+        camera.calculate_uniforms();
+        camera
     }
 
     pub fn uniforms(&self) -> &CameraUniforms {
@@ -46,6 +55,32 @@ impl Camera {
     }
 
     pub fn zoom(&mut self, displacement: f32) {
-        self.uniforms.origin = self.uniforms.origin + displacement * self.uniforms.w;
+        self.uniforms.origin += displacement * self.uniforms.w;
+    }
+
+    pub fn pan(&mut self, du: f32, dv: f32) {
+        let pan = du * self.uniforms.u + dv * self.uniforms.v;
+        self.center += pan;
+        self.uniforms.origin += pan;
+    }
+
+    pub fn orbit(&mut self, du: f32, dv: f32) {
+        const MAX_ALT: f32 = FRAC_PI_2 - 1e-6;
+        self.altitude = (self.altitude + dv).clamp(-MAX_ALT, MAX_ALT);
+        self.calculate_uniforms();
+    }
+
+    fn calculate_uniforms(&mut self) {
+        let w = {
+            let (y, z) = self.altitude.sin_cos();
+            -Vec3::new(0., y, z)
+        };
+        let origin = self.center - self.distance * w;
+        let u = w.cross(&self.up).normalized();
+        let v = u.cross(&w);
+        self.uniforms.origin = origin;
+        self.uniforms.u = u;
+        self.uniforms.v = v;
+        self.uniforms.w = w;
     }
 }

@@ -4,7 +4,7 @@
 use {
     anyhow::{Context, Result},
     winit::{
-        event::{Event, MouseScrollDelta, WindowEvent},
+        event::{DeviceEvent, ElementState, Event, MouseScrollDelta, WindowEvent},
         event_loop::{ControlFlow, EventLoop},
         window::{Window, WindowBuilder},
     },
@@ -31,25 +31,28 @@ async fn main() -> Result<()> {
 
     let (device, queue, surface) = connect_to_gpu(&window).await?;
     let mut renderer = render::PathTracer::new(device, queue, WIDTH, HEIGHT);
+    /*
     let mut camera = Camera::look_at(
-        Vec3::new(0., 0.75, 1.),
-        Vec3::new(0., -0.5, -1.),
+        Vec3::new(0., 0., 1.),
+        Vec3::new(0., 0., -1.),
         Vec3::new(0., 1., 0.),
+    );*/
+    let mut camera = Camera::with_spherical_coords(
+        Vec3::new(0., 0., -1.),
+        Vec3::new(0., 1., 0.),
+        2.,
+        0.,
+        0.,
     );
+
+    let mut left_mouse_button_pressed = false;
+    let mut right_mouse_button_pressed = false;
 
     event_loop.run(|event, control_handle| {
         control_handle.set_control_flow(ControlFlow::Poll);
         match event {
             Event::WindowEvent { event, .. } => match event {
                 WindowEvent::CloseRequested => control_handle.exit(),
-                WindowEvent::MouseWheel { delta, .. } => {
-                    let delta = match delta {
-                        MouseScrollDelta::PixelDelta(delta) => 0.001 * delta.y as f32,
-                        MouseScrollDelta::LineDelta(_, y) => y * 0.1,
-                    };
-                    camera.zoom(delta);
-                    renderer.reset_samples();
-                }
                 WindowEvent::RedrawRequested => {
                     // Wait for the next available frame buffer.
                     let frame: wgpu::SurfaceTexture = surface
@@ -64,6 +67,37 @@ async fn main() -> Result<()> {
 
                     frame.present();
                     window.request_redraw();
+                }
+                _ => (),
+            },
+            Event::DeviceEvent { event, .. } => match event {
+                DeviceEvent::MouseWheel { delta } => {
+                    let delta = match delta {
+                        MouseScrollDelta::PixelDelta(delta) => 0.001 * delta.y as f32,
+                        MouseScrollDelta::LineDelta(_, y) => y * 0.1,
+                    };
+                    camera.zoom(delta);
+                    renderer.reset_samples();
+                }
+                DeviceEvent::MouseMotion { delta: (dx, dy) } => {
+                    let dx = dx as f32 * 0.01;
+                    let dy = dy as f32 * -0.01;
+                    if left_mouse_button_pressed {
+                        camera.orbit(dx, dy);
+                        renderer.reset_samples();
+                    }
+                    if right_mouse_button_pressed {
+                        camera.pan(dx, dy);
+                        renderer.reset_samples();
+                    }
+                }
+                DeviceEvent::Button { button, state } => {
+                    let pressed = state == ElementState::Pressed;
+                    match button {
+                        0 => left_mouse_button_pressed = pressed,
+                        1 => right_mouse_button_pressed = pressed,
+                        _ => (),
+                    }
                 }
                 _ => (),
             },

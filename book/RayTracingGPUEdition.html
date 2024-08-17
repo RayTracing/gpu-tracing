@@ -4735,7 +4735,7 @@ simply always update the camera uniforms before rendering an individual frame:
                         window.request_redraw();
                     }
                     _ => (),
-                }
+                },
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
                 Event::DeviceEvent { event, .. } => match event {
                     DeviceEvent::MouseWheel { delta } => {
@@ -4746,7 +4746,7 @@ simply always update the camera uniforms before rendering an individual frame:
                         camera.zoom(delta);
                     }
                     _ => (),
-                }
+                },
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
                 _ => (),
             }
@@ -4798,7 +4798,7 @@ for the initial value of `uniforms.frame_count`. So all we need to do is reset t
             match event {
                 Event::WindowEvent { event, .. } => match event {
                     ...
-                }
+                },
                 Event::DeviceEvent { event, .. } => match event {
                     DeviceEvent::MouseWheel { delta } => {
                         let delta = match delta {
@@ -4886,7 +4886,7 @@ mouse button gets pressed and released.
             match event {
                 Event::WindowEvent { event, .. } => match event {
                     ...
-                }
+                },
                 Event::DeviceEvent { event, .. } => match event {
                     DeviceEvent::MouseWheel { delta } => {
                         let delta = match delta {
