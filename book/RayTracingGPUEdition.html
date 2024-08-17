@@ -1813,7 +1813,7 @@ Running the program now should produce an image that looks like this:
 pick any relative orientation for the major axes that you want, as long as you stay consistent.
 
 [^ch5-footnote2]: Interpolating from blue towards a reddish color instead of pure white can resemble
-twilight. Give `vec3(1., 5. 0.3)`) a try.
+twilight. Give `vec3(1., 0.5, 0.3)`) a try.
 
 Ray-Sphere Intersection
 -----------------------
@@ -3504,13 +3504,16 @@ new function responsible for traversing the scene and finding an intersection, c
 
 A second new function, called `scatter`, will be responsible for evaluating the surface material.
 For now it returns two values: an attenuation factor that represents the fraction of scattered
-radiance and a scattering direction. We store the attenuation factor as a `vec3f` since
-we're computing a separate radiance value for each color channel.[^ch7-footnote3]
+radiance and a scattering direction (typically denoted with the lower-case Greek letter $\omega$).
+We store the attenuation factor as a `vec3f` since we're computing a separate radiance value for
+each color channel.[^ch7-footnote3] Surface materials (which we'll explore in Section [materials])
+are represented by various _scattering functions_. A scattering function maps an _incident_ light
+direction $\omega_i$ to an _outgoing_ light direction $\omega_o$.
 
-Our rays originate from the camera and trace the transport path backwards towards light sources,
-so when we call `scatter` we already know the scattering direction. In that sense "scatter" may
-feel like a misnomer (as it computes the opposite). This doesn't really make a difference: as we'll
-find out later, the incident and outgoing light directions are interchangeable. The surface
+The rays originate from the camera and trace the transport path backwards towards light sources,
+so when we call `scatter` we already know the scattering direction $\omega_o$. In that sense
+"scatter" is somewhat a misnomer, since we're using it to compute $\omega_i$. This doesn't really
+make a difference, as the incident and outgoing light directions are interchangeable. The surface
 scattering functions that we will implement are all going to be _bi-directional_, i.e. work the same
 way in either direction. As such, our `scatter` function allows the `input_ray` parameter to be
 either an incident or a scattered light direction.
@@ -3765,7 +3768,7 @@ You should get this result:
 The image looks a lot brighter (as expected) but there is a well-defined black circle in between
 the spheres. That looks wrong, given the spheres aren't supposed to absorb any light. Luckily there
 is an easy explanation: the current upper limit on path length (i.e. `MAX_PATH_LENGTH`) is too low
-fully explore that part of the scene, so the path gets terminated before it can find the light
+to fully explore that part of the scene, so the path gets terminated before it can find the light
 source.
 
   ![Figure [path-sphere-interreflections]: A light transport path with 7 bounces
@@ -3791,7 +3794,7 @@ that at least 13 bounces are necessary to eliminate the black circle for this pa
 This begs the question: what is the ideal value for `MAX_PATH_LENGTH`? The answer depends on a
 number of factors, but it mainly comes down to the scene and performance expectations. Fewer
 bounces means less computation but potentially incorrect images. More bounces means more light
-paths get explored but more compututation is necessary. It also increases the chances of wasted work
+paths get explored but more computation is necessary. It also increases the chances of wasted work
 on paths that don't contribute significantly to the final image. We'll revisit this topic later.
 
 
@@ -3801,6 +3804,7 @@ All real-world objects absorb some amount of light. They also impart a color on 
 reflect. It would be nice to assign different colors to the spheres so we can tell them apart. For
 now, let's add an additional field to the `Sphere` structure to hold a shape's color:
 
+<script type="preformatted">
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
     ...
     struct Sphere {
@@ -3821,6 +3825,7 @@ now, let's add an additional field to the `Sphere` structure to hold a shape's c
     );
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     [Listing [sphere-color-field]: <kbd>[shaders.wgsl]</kbd> New `color` field for struct `Sphere`]
+</script>
 
 
 The RGB triplet can directly represent the attenuation factor for a given sphere. Let's have the
@@ -3881,9 +3886,9 @@ around. In order to reposition the camera with user input, we need a representat
 state that is shared between the CPU and GPU sides of the program.
 
 In our GPU code, we have relied on built-in vector algebra primitives (such as `vec3`) provided by
-WGSL. We need similar primitives on the CPU side, as they will come in handy to update
-camera parameters in response to input events. To that end, we'll be adding a new `algebra` module
-for linear algebra utilities:
+WGSL. We need similar primitives on the CPU side in order to compute camera parameters (such as
+camera position and orientation) in response to input events generated by the windowing system.
+To that end, we'll be adding a new `algebra` module for linear algebra utilities:
 
 <script type="preformatted">
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
@@ -4033,6 +4038,41 @@ for linear algebra utilities:
             lhs.z() / rhs,
         ])
     });
+
+    impl ops::AddAssign for Vec3 {
+        fn add_assign(&mut self, rhs: Self) {
+            *self = *self + rhs;
+        }
+    }
+
+    impl ops::SubAssign for Vec3 {
+        fn sub_assign(&mut self, rhs: Self) {
+            *self = *self - rhs;
+        }
+    }
+
+    impl ops::MulAssign<f32> for Vec3 {
+        fn mul_assign(&mut self, rhs: f32) {
+            *self = *self * rhs;
+        }
+    }
+
+    impl ops::DivAssign<f32> for Vec3 {
+        fn div_assign(&mut self, rhs: f32) {
+            *self = *self / rhs;
+        }
+    }
+
+    impl ops::Neg for Vec3 {
+        type Output = Vec3;
+        fn neg(self) -> Self::Output {
+            Vec3([
+                -self.x(),
+                -self.y(),
+                -self.z(),
+            ])
+        }
+    }
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     [Listing [algebra-module]: <kbd>[algebra.rs]</kbd> Utility code for vector algebra]
 </script>
@@ -4052,7 +4092,8 @@ for linear algebra utilities:
 
 `algebra.rs` defines a single type: `Vec3`. As its name suggests, this type represents a
 3-dimensional vector with three 32-bit floating point components. `Vec3` defines methods for vector
-operations and binary operator overloads for component-wise arithmetic (+, -, *, /).[^ch8-footnote1]
+operations and operator overloads for component-wise arithmetic (`+, -, *, /`) and assignment
+(`+=, -=, *=, /=`).[^ch8-footnote1]
 The memory layout of a `Vec3` consists of three contiguous `f32`'s (taking up 12 bytes) which
 exactly matches the layout of the WGSL `vec3f` type.
 
@@ -4062,13 +4103,12 @@ exactly matches the layout of the WGSL `vec3f` type.
 value types (such as `fn add(self, rhs: RHS) -> Output` in `std::ops::Add`) and don't automatically
 extend to invocations on borrows. For example, `a + b`, where `a` and `b` are both `Vec3`, is
 different from `a + &b`, `&a + b`, and `&a + &b`. The `impl_binary_op` macro automatically implements
-the traits for all of these combinations for convenience.
+the traits for all of these combinations, for convenience.
 
 Uniforms and Alignment
 ----------------------
-In order to share camera state across the CPU and GPU sides, it makes sense to extend the uniform
-buffer to hold the camera parameters. Let's define a new `CameraUniforms` structure that stores the
-camera position:
+We can use the uniform buffer to make the camera parameters visible to both the CPU and GPU sides of
+the program. Let's define a new `CameraUniforms` structure that just stores the camera position:
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
     ...
@@ -4102,7 +4142,7 @@ camera position:
     [Listing [apply-sphere-color]: <kbd>[shaders.wgsl]</kbd> Use sphere color to attenuate throughput]
 
 We need to mirror these changes on the CPU side. Let's introduce a new Rust module called `camera`
-to contain all camera related code.
+for all camera related code.
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
     use bytemuck::{Pod, Zeroable};
@@ -4218,7 +4258,7 @@ We'll also reposition the camera origin to verify our changes:
     [Listing [camera-module-decl]: <kbd>[renderer.rs]</kbd> Update the `Uniforms` struct with camera parameters]
 </script>
 
-When you run this code, wgpu should return an API validation error that says "_Buffer is bound with
+When you run this code, wgpu should emit an API validation error that says "_Buffer is bound with
 size 24 where the shader expects 32_." 24 bytes looks correct at first glance: 12 bytes for a `Vec3`
 (4 bytes each for 3 `f32`s), and 3 `u32`s for the `width`, `height`, and `frame_count` fields, each
 taking up 4 bytes. The error message says the shader declared a 32-byte struct, so where do the 8
@@ -4275,7 +4315,7 @@ the Rust side.
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     [Listing [camera-uniforms-padded]: <kbd>[camera.rs]</kbd> `CameraUniforms` explicitly padded]
 
-We also introduce a new member of type `CameraUniforms` to the `Uniforms` struct. That increased the
+We also introduced a new member of type `CameraUniforms` to the `Uniforms` struct. That increased the
 latter's alignment to 16 and brought its size up to 28 bytes. 28 is not a multiple of the new
 alignment and the next closest multiple is 32. Therefore we need to pad `Uniforms` with 4 additional
 bytes:
@@ -4290,7 +4330,7 @@ bytes:
         height: u32,
         frame_count: u32,
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
-        _pad: 0,
+        _pad: u32,
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
     }
 
@@ -4325,24 +4365,42 @@ should now pass validation and render an image that looks like this:
 [^ch8-footnote2]: The alignment and size requirements for WGSL types are defined at
 https://www.w3.org/TR/WGSL/#alignment-and-size.
 
-Basis Vectors
--------------
-We can reposition the camera origin but the viewport always faces the $-z$-axis in camera
-coordinates (see Figure [camera-view-space]). We currently generate all camera ray directions
-relative to this arrangement in the scene coordinate system. In order to support arbitrary view
-directions, we need a way to generate rays in camera coordinates and somehow rotate them to be
-aligned with the camera orientation within the scene coordinate system.
+Rotation
+--------
+We know how to reposition the camera but the view direction is still fixed towards $-z$.
+Remember that we define the camera ray direction for each pixel in terms of a point
+on an imaginary viewport (Figure [camera-view-space]). Conceptually, rotating the camera to
+change the view direction is much like moving and rotating the viewport around the camera origin.
 
-We can achieve this with a _change of basis_. The 3 coordinate axes of a
-3D (Euclidean) coordinate space can be defined in terms of 3 basis vectors that are orthogonal
-to each other; for example, our scene coordinates are relative to
-$x = \begin{bmatrix} 1 \\ 0 \\ 0 \end{bmatrix}$,
-$y = \begin{bmatrix} 0 \\ 1 \\ 0 \end{bmatrix}$,
-$z = \begin{bmatrix} 0 \\ 0 \\ 1 \end{bmatrix}$. Suppose we define the basis vectors of
-the camera coordinate space as $\vec{\textbf{u}}$ ($x$-coordinate pointing to the right),
-$\vec{\textbf{v}}$ ($y$-coordinate pointing up), and $\vec{\textbf{w}}$ ($z$-coordinate pointing
-forward, towards the viewport). We can then transform a ray direction vector from camera coordinates
-to the scene coordinate space by multiplying it by the matrix:
+Let's imagine for a moment that the coordinate system depicted in Figure [camera-view-space] is
+distinct from the coordinate space of the scene. This new _camera coordinate space_ has its own
+$x$, $y$, and $z$ axes. The viewport is always parallel to the $xz$-plane and sits some distance
+away on the $z$-axis. We can even define this coordinate system as left-handed so that the
+view direction faces the $+z$-axis instead of $-z$.
+
+Now imagine that the camera coordinate space exists within the scene coordinate space and it can
+move around freely. Suppose that the camera coordinate axes can point towards any direction in
+scene space as long as they satisfy the definition of our left-handed cartesian system: **a)** the axes
+are always orthogonal to each other (i.e. the angle between any two axes is 90 degrees), and **b)**
+from the camera's point of view, $+x$ points towards the _right_, $+y$ points _up_, and $+z$ points
+_forward_.
+
+Let's define the scene-space orientation of the camera coordinate axes with 3 unit vectors:
+$\vec{\textbf{u}}$ for $+x$, $\vec{\textbf{v}}$ for $+y$, and $\vec{\textbf{w}}$ for $+z$. These
+are the _basis vectors_ of the camera coordinate space. For example, our current camera orientation
+staring down the $-z$-axis of the scene coordinate space (with $+y$ pointing up), would
+have the basis vectors $\vec{\textbf{u}} = \begin{bmatrix} 1 \\ 0 \\  0 \end{bmatrix}$,
+$\vec{\textbf{v}} = \begin{bmatrix} 0 \\ 1 \\  0 \end{bmatrix}$,
+$\vec{\textbf{w}} = \begin{bmatrix} 0 \\ 0 \\ -1 \end{bmatrix}$.
+
+  ![Figure [camera-basis-vectors]: Camera basis vectors in relation to camera parameters
+   ](../images/fig-12-camera-basis-vectors.svg)
+
+These vectors establish a relationship between the two coordinate systems. Each basis vector
+tells us how to project the corresponding camera-space axis onto the scene-space axes. With this
+information, we can transform any vector defined in one space into the other. For example, we can
+rotate a ray direction vector defined in camera-space into the appropriate scene-space orientation
+by multiplying it by this matrix:
 
   $$
      \begin{bmatrix}
@@ -4358,7 +4416,7 @@ the camera origin, a reference point the camera should "look at", and an "up" di
 reference point will always appear at the center of the viewport. The vector pointing from the
 origin to this center point is the view direction $\vec{\textbf{w}}$.
 
-The cross product of two vectors yields another vector that is orthogonal to the plane formed by
+The cross product of two vectors yields another vector that is orthogonal to the plane formed by the
 original two, so once we know $\vec{\textbf{w}}$, we can compute the other two basis vectors using
 a series of cross products:
 
@@ -4368,9 +4426,6 @@ a series of cross products:
   \vec{\textbf{v}} &= \vec{\textbf{u}} \times \vec{\textbf{w}} 
   \end{aligned}
   $$
-
-  ![Figure [camera-basis-vectors]: Camera basis vectors in relation to camera parameters
-   ](../images/fig-12-camera-basis-vectors.svg)
 
 Let's start with the WGSL and extend the `CameraUniforms` structure to hold the basis
 vectors in addition to the origin. We'll construct a 3x3 matrix out of the basis vectors and use
@@ -4502,8 +4557,8 @@ sphere from above:
 
 Zoom
 ----
-Now that we know how to position and orient the camera, let's start adding controls for camera
-movement. It is generally useful to be able to bring the camera closer to (or away from) the object
+Now let's start add controls for camera movement. It is generally useful to be able to bring the
+camera closer to (or away from) the object
 in view without changing the viewing angle. Imagine a straight line through the `origin` and `center`
 parameters of our `Camera::look_at` function. We can achieve a simple _zoom_ effect by moving the
 camera forwards or backwards along this line. The basis vector $\vec{\textbf{w}}$ already gives us
@@ -4534,17 +4589,18 @@ will move it backwards:
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
 
         pub fn zoom(&mut self, displacement: f32) {
-            self.uniforms.origin = self.uniforms.origin + displacement * self.uniforms.w;
+            self.uniforms.origin += displacement * self.uniforms.w;
         }
     }
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    [Listing [camera-basis-vectors-cpu]: <kbd>[camera.rs]</kbd> The `Camera::zoom` function]
+    [Listing [camera-fn-zoom]: <kbd>[camera.rs]</kbd> The `Camera::zoom` function]
 
 The next step is to wire this up to an input method. I personally prefer the scroll wheel on a
-mouse (or a scroll gesture on a trackpad) in this case, so I'll show you how to implement that.
-`winit` sends the event `WindowEvent::MouseWheel` for this purpose. The event provides a parameter
-called `delta` which we can convert to a displacement amount. There are two variants of this
-parameter:
+mouse (or a scroll gesture on a trackpad) for zooming, so I'll show you how to implement that.
+`winit` sends raw input device events in the form of a `Event::DeviceEvent`. This is an enum 
+type (just like `Event::WindowEvent`) and the specific variant for mouse wheel events is named
+`DeviceEvent::MouseWheel`. The event has a parameter called `delta` which we can convert to a
+displacement amount. There are two variants of this parameter:
 
 - `MouseScrollDelta::PixelDelta`: represents the delta in "number of pixels", typically generated by
   a touch screen or trackpad.
@@ -4552,15 +4608,15 @@ parameter:
   typically corresponding to the discrete "clicks" of a mouse scroll wheel.
 
 The variant you receive depends on your input device. It usually makes sense to apply a scaling factor
-to this delta, since using it directly as the displacement amount is likely to result in a very
-large distance value in scene coordinates. I use factors of 0.001 and 0.1 for the two events
-respectively, though the "ideal" factor may depend on your device and system settings. The `delta`
+to this delta, since using it directly is likely to result in a very large displacement in scene
+coordinates. I used factors of 0.001 and 0.1 for the two events
+respectively, though the ideal factor is going to depend on your device and system settings. The `delta`
 value is _signed_, with positive and negative values corresponding to scrolling up and down, which
 translates nicely to our `displacement` parameter.
 
 We are going to handle the mouse scroll event in our main event loop. The event loop code currently
 doesn't have direct access to the `Camera` object, as it is internal to the `PathTracer`
-constructor. `PathTracer::new` currently discards the camera object, retaining only the uniform data
+constructor. `PathTracer::new` currently discards the camera object, retaining only the uniform data,
 as the camera state has so far been static. In addition to retaining the camera state, we also need
 a way to update the uniforms buffer for changes to take effect before rendering a frame.
 
@@ -4619,7 +4675,18 @@ simply always update the camera uniforms before rendering an individual frame:
 
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
-    ...
+    use {
+        anyhow::{Context, Result},
+        winit::{
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+            event::{DeviceEvent, Event, MouseScrollDelta, WindowEvent},
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+            event_loop::{ControlFlow, EventLoop},
+            window::{Window, WindowBuilder},
+        },
+    };
+
+    mod algebra;
     mod camera;
     mod render;
 
@@ -4649,15 +4716,6 @@ simply always update the camera uniforms before rendering an individual frame:
             match event {
                 Event::WindowEvent { event, .. } => match event {
                     WindowEvent::CloseRequested => control_handle.exit(),
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
-                    WindowEvent::MouseWheel { delta, .. } => {
-                        let delta = match delta {
-                            MouseScrollDelta::PixelDelta(delta) => 0.001 * delta.y as f32,
-                            MouseScrollDelta::LineDelta(_, y) => y * 0.1,
-                        };
-                        camera.zoom(delta);
-                    }
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
                     WindowEvent::RedrawRequested => {
                         // Wait for the next available frame buffer.
                         let frame: wgpu::SurfaceTexture = surface
@@ -4677,7 +4735,19 @@ simply always update the camera uniforms before rendering an individual frame:
                         window.request_redraw();
                     }
                     _ => (),
-                },
+                }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+                Event::DeviceEvent { event, .. } => match event {
+                    DeviceEvent::MouseWheel { delta } => {
+                        let delta = match delta {
+                            MouseScrollDelta::PixelDelta(delta) => 0.001 * delta.y as f32,
+                            MouseScrollDelta::LineDelta(_, y) => y * 0.1,
+                        };
+                        camera.zoom(delta);
+                    }
+                    _ => (),
+                }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
                 _ => (),
             }
         })?;
@@ -4695,10 +4765,10 @@ and forth, pausing at different distances for a few seconds:
 
 This is the same effect that we saw in Figure [temporal-blur-effect], which is caused by temporal
 accumulation. Moving the camera effectively invalidates all the samples we have collected up to that
-point, as our cached radiance values only make sense for a specific camera position. The simplest
-thing we can do is to discard old samples whenever we mutate the camera. Luckily, this is pretty
-easy to do: the code we added in Listing [sample-accumulation] already ignores old samples for the
-initial value of `uniforms.frame_count`. So all we need to do is reset the frame count:
+point, as our cached radiance values only make sense for a specific camera configuration. The
+simplest thing we can do is discard old samples whenever we mutate the camera. Luckily, this is
+pretty easy to do: the code we added in Listing [sample-accumulation] already ignores old samples
+for the initial value of `uniforms.frame_count`. So all we need to do is reset the frame count:
 
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
@@ -4720,14 +4790,17 @@ initial value of `uniforms.frame_count`. So all we need to do is reset the frame
 
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
     fn main() -> Result<()> {
         ...
         event_loop.run(|event, control_handle| {
             control_handle.set_control_flow(ControlFlow::Poll);
             match event {
                 Event::WindowEvent { event, .. } => match event {
-                    WindowEvent::CloseRequested => control_handle.exit(),
-                    WindowEvent::MouseWheel { delta, .. } => {
+                    ...
+                }
+                Event::DeviceEvent { event, .. } => match event {
+                    DeviceEvent::MouseWheel { delta } => {
                         let delta = match delta {
                             MouseScrollDelta::PixelDelta(delta) => 0.001 * delta.y as f32,
                             MouseScrollDelta::LineDelta(_, y) => y * 0.1,
@@ -4737,12 +4810,15 @@ initial value of `uniforms.frame_count`. So all we need to do is reset the frame
                         renderer.reset_samples();
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
                     }
-                    WindowEvent::RedrawRequested => {
-                    ...
+                    _ => (),
+                }
+                _ => (),
+            }
+            ...
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     [Listing [mouse-wheel-reset-samples]: <kbd>[main.rs]</kbd> Reset samples on camera zoom]
 
-Now you should see no artifacts when you zoom in and out:
+You should no longer see any artifacts when you zoom in and out:
 
   ![Figure [zooming-in-and-out]: (video) Zooming in and out
    ](../images/vid-02-zooming-in-and-out.mp4 autoplay muted loop)
