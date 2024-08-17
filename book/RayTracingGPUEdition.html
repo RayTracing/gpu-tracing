@@ -4823,6 +4823,106 @@ You should no longer see any artifacts when you zoom in and out:
   ![Figure [zooming-in-and-out]: (video) Zooming in and out
    ](../images/vid-02-zooming-in-and-out.mp4 autoplay muted loop)
 
+Pan
+---
+The next camera movement type on our list is _pan_, which moves the camera left, right, up, or
+down without changing the view direction. We're going to align these 4 directions to the basis
+vectors $\vec{\mathbf{u}}$ and $\vec{\mathbf{v}}$ and displace the origin point on the 2D plane
+that is perpendicular to the view direction.
+
+  ![Figure [orbit-camera-pan]: Pan movement on the uv-plane.
+   ](../images/fig-14-orbit-camera-pan.svg)
+
+A new `Camera::pan` function will accept two delta values that represent displacement in two
+dimensions ($\vec{\mathbf{u}}$ and $\vec{\mathbf{v}}$). Note that both of these values (`du` and
+`dv`) can be negative:
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+    impl Camera {
+        ...
+        pub fn uniforms(&self) -> &CameraUniforms {
+            &self.uniforms
+        }
+
+        pub fn zoom(&mut self, displacement: f32) {
+            self.uniforms.origin += displacement * self.uniforms.w;
+        }
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        pub fn pan(&mut self, du: f32, dv: f32) {
+            let pan = du * self.uniforms.u + dv * self.uniforms.v;
+            self.uniforms.origin += pan;
+        }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [camera-fn-pan]: <kbd>[camera.rs]</kbd> The `Camera::pan` function]
+
+Let's continue using the mouse, this time translating its motion to camera movement.
+`winit` sends the `DeviceEvent::MouseMotion` with a 2D `delta` parameter that contains
+the mouse displacement in $x$ and $y$ coordinates. Negative and positive values of the $x$ delta
+corresponds to left and right movement, respectively. Similarly, negative and positive values of the
+$y$ delta corresponds to movement up and down.
+
+Note that the application will receive the `DeviceEvent::MouseMotion` even without input focus.
+Unless we explicitly control when the camera should and should not move, all mouse movement will
+result in camera movement and reset the radiance samples. Bumping into the mouse while waiting for
+a slow render to resolve can be annoying, so let's prevent accidents and require that the user hold
+down a mouse button during movement. We can use the `DeviceEvent::Button` event to detect when a
+mouse button gets pressed and released.
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+    let mut mouse_button_pressed = false;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+
+    fn main() -> Result<()> {
+        ...
+        event_loop.run(|event, control_handle| {
+            control_handle.set_control_flow(ControlFlow::Poll);
+            match event {
+                Event::WindowEvent { event, .. } => match event {
+                    ...
+                }
+                Event::DeviceEvent { event, .. } => match event {
+                    DeviceEvent::MouseWheel { delta } => {
+                        let delta = match delta {
+                            MouseScrollDelta::PixelDelta(delta) => 0.001 * delta.y as f32,
+                            MouseScrollDelta::LineDelta(_, y) => y * 0.1,
+                        };
+                        camera.zoom(delta);
+                        renderer.reset_samples();
+                    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+                    DeviceEvent::MouseMotion { delta: (dx, dy) } => {
+                        if mouse_button_pressed {
+                            camera.pan(dx as f32 * 0.01, dy as f32 * -0.01);
+                            renderer.reset_samples();
+                        }
+                    }
+                    DeviceEvent::Button { state, .. } => {
+                        // NOTE: If multiple mouse buttons are pressed, releasing any of them will
+                        // set this to false.
+                        mouse_button_pressed = state == ElementState::Pressed;
+                    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+                    _ => (),
+                }
+                _ => (),
+            }
+            ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [mouse-motion-camera-pan]: <kbd>[main.rs]</kbd> Pan camera on click-and-drag]
+
+We apply a scale factor to adjust the mouse sensitivity and also flip the sign of `dy` so that
+moving the mouse upwards pans the camera upwards.
+
+  ![Figure [camera-pan]: (video) Pan camera with mouse movement](../images/vid-03-camera-pan.mp4 autoplay muted loop)
+
+
                                (insert acknowledgments.md.html here)
 
 References
