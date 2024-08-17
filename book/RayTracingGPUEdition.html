@@ -4923,6 +4923,377 @@ moving the mouse upwards pans the camera upwards.
   ![Figure [camera-pan]: (video) Pan camera with mouse movement](../images/vid-03-camera-pan.mp4 autoplay muted loop)
 
 
+Orbit
+-----
+The zoom and pan controls let us move the `origin` point along the camera basis vectors without
+changing the view direction. In order to freely look around objects in the scene, we need a way to
+rotate the basis vectors.
+
+The view direction $\vec{\mathbf{w}}$ is parallel to the vector that subtends the `origin` and
+`center` points. We can effectively re-orient $\vec{\mathbf{w}}$ by simply re-positioning these two
+points with respect to each other. Keeping `origin` fixed while moving `center` would result in a
+_first-person_ style camera (imagine shifting your gaze around you without moving)
+Alternately, keeping `center` fixed while moving `origin` around would appear as moving around while
+facing the same stationary point. Both are valid approaches, though we're going to focus on the
+latter.
+
+Let's say that `origin` is allowed to move freely around `center` but we require that the distance
+between the two points remain fixed. Now imagine a sphere that is centered at `center`, with a
+radius equal to the distance between the two points. All possible positions of `origin` are then
+located on the surface of this sphere.
+
+  ![Figure [orbit-camera-angles]: The spherical coordinates of the camera origin, with azimuth angle $\theta$ and altitude angle $\phi$
+   ](../images/fig-15-orbit-camera-angles.svg)
+
+Given the sphere's `center` and its radius, we can represent any point on the surface of the sphere
+using polar coordinates: an _azimuth_ angle and an _altitude_ angle. These two angles help us define
+the location of `origin` in terms of rotations around the coordinate axes. This is convenient, since
+we can easily map mouse movement to changes in polar coordinates, and use this representation to
+move `origin` around `center`. With a little bit of trigonometry, we can compute $\vec{\mathbf{w}}$
+from the two angles. If we also know the distance between the camera and `center`, `origin` can be
+computed with a simple vector addition.
+
+### Working With Spherical Coordinates
+
+Let's expand the `Camera` struct with 4 new parameters:
+
+- `center`: the point of camera focus, which serves as the center of rotation.
+- `azimuth`: the azimuth angle $\theta$, defining rotation around the $y$-axis. Values can range
+  from $0$ to $2\pi$.
+- `altitude`: the altitude angle $\phi$, defining rotation around the basis vector $\vec{\mathbf{u}}$. We'll
+  allow values to range from $-\frac{\pi}{2}$ to $\frac{\pi}{2}$ such that $sin~\phi$ yields a
+  $y$-coordinate ranging from $-1$ to $1$.
+- `distance`: the distance between `center` and `origin`. This is assumed to be a positive, non-zero
+  value.
+
+The bottom are _spherical coordinates_ for `origin`, ($\theta$, $\phi$, $r$). We're going to
+define the coordinate system such that ($0$, $0$, $d$) corresponds to a view direction aligned with
+the $-z$-axis, $d$ units away from `center`. Similarly, spherical coordinates ($0$, $\pi$, $1$) will
+have the view direction point down the $-y$-axis, with the camera located at the cartesian
+coordinates ($0$, $1$, $0$).
+
+First, we'll rework the scene so that we can more easily observe rotations (the current scene is
+symmetrical around the $y$-axis, so changes in azimuth would be difficult to tell). Let's also reset
+the camera:
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+    const OBJECT_COUNT: u32 = 4;
+    alias Scene = array<Sphere, OBJECT_COUNT>;
+    var<private> scene: Scene = Scene(
+      Sphere(/*center*/ vec3(1., 0., -1.), /*radius*/ 0.5, /*color*/ vec3(0.5, 0.4, 0.)),
+      Sphere(/*center*/ vec3(-1., 0., -1.), /*radius*/ 0.5, /*color*/ vec3(0.2, 0.5, 0.2)),
+      Sphere(/*center*/ vec3(0., -1.1, -1.), /*radius*/ 0.5, /*color*/ vec3(0.7, 0.4, 0.6)),
+      Sphere(/*center*/ vec3(0.,  1.1, -1.), /*radius*/ 0.5, /*color*/ vec3(0.2, 0.2, 1.)),
+    );
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [four-spheres]: <kbd>[shaders.wgsl]</kbd> Spheres arranged on $x$ and $y$ axes]
+</script>
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+    async fn main() -> Result<()> {
+        ...
+        let (device, queue, surface) = connect_to_gpu(&window).await?;
+        let mut renderer = render::PathTracer::new(device, queue, WIDTH, HEIGHT);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        let mut camera = Camera::look_at(
+            Vec3::new(0., 0., 1.),
+            Vec3::new(0., 0.,-1.),
+            Vec3::new(0., 1., 0.),
+        );
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+        ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [camera-default-position]: <kbd>[main.rs]</kbd>]
+
+  ![Figure [four-spheres-orbit]: Four spheres for reference](../images/img-26-four-spheres.png)
+
+For now, we are going to do away with `Camera::look_at` and introduce a new constructor called
+`Camera::with_spherical_coords`. This will compute the camera uniforms (i.e. the basis vectors and
+the origin) from the new parameters. Since we are going to need to re-compute
+the camera uniforms whenever the spherical coordinates change, let's factor that logic out to a
+helper called `Camera::calculate_uniforms`:
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+    pub struct Camera {
+        uniforms: CameraUniforms,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        center: Vec3,
+        up: Vec3,
+        distance: f32,
+        azimuth: f32,
+        altitude: f32,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    }
+    ...
+
+    impl Camera {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust delete
+        pub fn look_at(origin: Vec3, center: Vec3, up: Vec3) -> Camera {
+            let w = (center - origin).normalized();
+            let u = w.cross(&up).normalized();
+            let v = u.cross(&w);
+            Camera {
+                uniforms: CameraUniforms {
+                    origin,
+                    _pad0: 0,
+                    u,
+                    _pad1: 0,
+                    v,
+                    _pad2: 0,
+                    w,
+                    _pad3: 0,
+                },
+            }
+        }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        pub fn with_spherical_coords(
+            center: Vec3,
+            up: Vec3,
+            distance: f32,
+            azimuth: f32,
+            altitude: f32,
+        ) -> Camera {
+            let mut camera = Camera {
+                uniforms: CameraUniforms::zeroed(),
+                center,
+                up,
+                distance,
+                azimuth,
+                altitude,
+            };
+            camera.calculate_uniforms();
+            camera
+        }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+
+        pub fn uniforms(&self) -> &CameraUniforms {
+            &self.uniforms
+        }
+
+        pub fn zoom(&mut self, displacement: f32) {
+            self.uniforms.origin += displacement * self.uniforms.w;
+        }
+
+        pub fn pan(&mut self, du: f32, dv: f32) {
+            let pan = du * self.uniforms.u + dv * self.uniforms.v;
+            self.uniforms.origin += pan;
+        }
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        fn calculate_uniforms(&mut self) {
+            // TODO: calculate the correct w.
+            let w = Vec3::new(0., 0., -1.);
+            let origin = self.center - self.distance * w;
+            let u = w.cross(&self.up).normalized();
+            let v = u.cross(&w);
+            self.uniforms.origin = origin;
+            self.uniforms.u = u;
+            self.uniforms.v = v;
+            self.uniforms.w = w;
+        }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [camera-basis-vectors-cpu]: <kbd>[camera.rs]</kbd> `Camera::with_spherical_coords`]
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+    async fn main() -> Result<()> {
+        ...
+        let (device, queue, surface) = connect_to_gpu(&window).await?;
+        let mut renderer = render::PathTracer::new(device, queue, WIDTH, HEIGHT);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        let mut camera = Camera::with_spherical_coords(
+            Vec3::new(0., 0., -1.),
+            Vec3::new(0., 1., 0.),
+            2.,
+            0.,
+            0.,
+        );
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+        ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [camera-default-position-spherical]: <kbd>[main.rs]</kbd> Default camera position with spherical coordinates]
+
+### Altitude Control
+
+We will use mouse movement to control the altitude and azimuth angles. We are already routing
+`DeviceEvent::MouseMotion` events to `Camera::pan` but we could reserve _left-click_ drag for
+orbital movement and _right-click_ drag for pan. The `DeviceEvent::Button` event has a `button`
+field that can be used to identify the mouse button that was pressed or released:
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+    async fn main() -> Result<()> {
+        ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        let mut left_mouse_button_pressed = false;
+        let mut right_mouse_button_pressed = false;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+
+        event_loop.run(|event, control_handle| {
+            control_handle.set_control_flow(ControlFlow::Poll);
+            match event {
+                ...
+                Event::DeviceEvent { event, .. } => match event {
+                    DeviceEvent::MouseWheel { delta } => {
+                        let delta = match delta {
+                            MouseScrollDelta::PixelDelta(delta) => 0.001 * delta.y as f32,
+                            MouseScrollDelta::LineDelta(_, y) => y * 0.1,
+                        };
+                        camera.zoom(delta);
+                        renderer.reset_samples();
+                    }
+                    DeviceEvent::MouseMotion { delta: (dx, dy) } => {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+                        let dx = dx as f32 *  0.01;
+                        let dy = dy as f32 * -0.01;
+                        if left_mouse_button_pressed {
+                            camera.orbit(dx, dy);
+                            renderer.reset_samples();
+                        }
+                        if right_mouse_button_pressed {
+                            camera.pan(dx, dy);
+                            renderer.reset_samples();
+                        }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+                    }
+                    DeviceEvent::Button { button, state } => {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+                        let pressed = state == ElementState::Pressed;
+                        match button {
+                            0 => left_mouse_button_pressed = pressed,
+                            1 => right_mouse_button_pressed = pressed,
+                            _ => (),
+                        }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+                    }
+                    _ => (),
+                }
+                _ => (),
+            }
+        })?;
+        Ok(())
+    }
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [handle-mouse-buttons]: <kbd>[main.rs]</kbd> Using different mouse buttons for `Camera::pan` and `Camera::orbit`]
+</script>
+
+Next, we'll define `Camera::orbit`. Let's initially ignore the azimuth angle. Vertical mouse
+movement will modify the altitude angle while keeping it between $-\frac{\pi}{2}$ to $\frac{\pi}{2}$.
+We won't allow the angle to increase or decrease beyond this range, so once the camera moves to one
+of these extrema, it will stay there unless it is moved in the opposite direction.
+
+Let's also update `Camera::calculate_uniforms` to compute $\vec{\mathbf{w}}$ using only the
+altitude. Consider the unit-length vector pointing from `center` to `origin`, i.e.
+$-\vec{\mathbf{w}}$. The $y$-coordinate of this vector is equal to $sin~\phi$. We're ignoring
+azimuth, so we can simply assign $0$ to the $x$-coordinate, and $cos~\phi$ to the $z$-coordinate:
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+    use {
+        bytemuck::{Pod, Zeroable},
+        std::f32::consts::FRAC_PI_2,
+    };
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+    impl Camera {
+        ...
+        pub fn uniforms(&self) -> &CameraUniforms {
+            &self.uniforms
+        }
+
+        pub fn zoom(&mut self, displacement: f32) {
+            self.uniforms.origin += displacement * self.uniforms.w;
+        }
+
+        pub fn pan(&mut self, du: f32, dv: f32) {
+            let pan = du * self.uniforms.u + dv * self.uniforms.v;
+            self.uniforms.origin += pan;
+        }
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        pub fn orbit(&mut self, du: f32, dv: f32) {
+            self.altitude = (self.altitude + dv).clamp(-FRAC_PI_2, FRAC_PI_2);
+            self.calculate_uniforms();
+        }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+
+        fn calculate_uniforms(&mut self) {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+            let w = {
+                let (y, z) = self.altitude.sin_cos();
+                -Vec3::new(0., y, z)
+            };
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+            let origin = self.center - self.distance * w;
+            let u = w.cross(&self.up).normalized();
+            let v = u.cross(&w);
+            self.uniforms.origin = origin;
+            self.uniforms.u = u;
+            self.uniforms.v = v;
+            self.uniforms.w = w;
+        }
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [camera-orbit-altitude]: <kbd>[camera.rs]</kbd> `Camera::orbit`, altitude-only]
+
+Now, when you hold down the left mouse button and move the camera around, you should see something
+like this:
+
+  ![Figure [camera-orbit-altitude]: (video) Adjust altitude angle with mouse movement
+   ](../images/vid-04-camera-orbit-altitude.mp4 autoplay muted loop)
+
+If you look carefully, you'll notice that the green and yellow spheres swap places when the altitude
+angle is at one of the extrema. At those angles (i.e. exactly at $-\frac{\pi}{2}$ and
+$\frac{\pi}{2}$) the view vector $\vec{\textbf{w}}$ becomes parallel to the _up_ vector and their
+cross product becomes zero. This causes both $\vec{\textbf{u}}$ and $\vec{\textbf{v}}$ to become
+degenerate. A simple fix is to truncate the range by a small amount, so that the angle can be
+close but never equal to $-\frac{\pi}{2}$ or $\frac{\pi}{2}$. This only works if _up_ is exactly
+$(0, 1, 0)$ or $(0, -1, 0)$ and doesn't generalize to other directions:
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+    impl Camera {
+        ...
+        pub fn orbit(&mut self, du: f32, dv: f32) {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+            const MAX_ALT: f32 = FRAC_PI_2 - 1e-6;
+            self.altitude = (self.altitude + dv).clamp(-MAX_ALT, MAX_ALT);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+            self.calculate_uniforms();
+        }
+        ...
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [camera-prevent-degenerate-altitude]: <kbd>[camera.rs]</kbd> Apply offset to altitude clamp]
+
+That should fix the issue:
+
+  ![Figure [camera-fixed-altitude-clamp]: (video) Fixed altitude clamp
+   ](../images/vid-05-fixed-altitude-clamp.mp4 autoplay muted loop)
+
+### Azimuth Control
+TODO: azimuth
+
+### Fixing Zoom
+TODO: fix zoom
+
+### `Camera::look_at`
+
+TODO: look_at
                                (insert acknowledgments.md.html here)
 
 References
