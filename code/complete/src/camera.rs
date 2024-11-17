@@ -67,13 +67,16 @@ impl Camera {
     pub fn orbit(&mut self, du: f32, dv: f32) {
         const MAX_ALT: f32 = FRAC_PI_2 - 1e-6;
         self.altitude = (self.altitude + dv).clamp(-MAX_ALT, MAX_ALT);
+        self.azimuth += du;
+        self.azimuth %= 2. * PI;
         self.calculate_uniforms();
     }
 
     fn calculate_uniforms(&mut self) {
         let w = {
-            let (y, z) = self.altitude.sin_cos();
-            -Vec3::new(0., y, z)
+            let (y, xz_scale) = self.altitude.sin_cos();
+            let (x, z) = self.azimuth.sin_cos();
+            -Vec3::new(x * xz_scale, y, z * xz_scale)
         };
         let origin = self.center - self.distance * w;
         let u = w.cross(&self.up).normalized();

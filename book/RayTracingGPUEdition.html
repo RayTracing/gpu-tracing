@@ -5194,7 +5194,8 @@ field that can be used to identify the mouse button that was pressed or released
 Next, we'll define `Camera::orbit`. Let's initially ignore the azimuth angle. Vertical mouse
 movement will modify the altitude angle while keeping it between $-\frac{\pi}{2}$ to $\frac{\pi}{2}$.
 We won't allow the angle to increase or decrease beyond this range, so once the camera moves to one
-of these extrema, it will stay there unless it is moved in the opposite direction.
+of these extrema, it will stay there unless it is moved in the opposite direction. This will
+disallow turning the scene "upside down" and spinning continously.
 
 Let's also update `Camera::calculate_uniforms` to compute $\vec{\mathbf{w}}$ using only the
 altitude. Consider the unit-length vector pointing from `center` to `origin`, i.e.
@@ -5256,7 +5257,7 @@ like this:
   ![Figure [camera-orbit-altitude]: (video) Adjust altitude angle with mouse movement
    ](../images/vid-04-camera-orbit-altitude.mp4 autoplay muted loop)
 
-If you look carefully, you'll notice that the green and yellow spheres swap places when the altitude
+If you look carefully, you may notice that the green and yellow spheres swap places when the altitude
 angle is at one of the extrema. At those angles (i.e. exactly at $-\frac{\pi}{2}$ and
 $\frac{\pi}{2}$) the view vector $\vec{\textbf{w}}$ becomes parallel to the _up_ vector and their
 cross product becomes zero. This causes both $\vec{\textbf{u}}$ and $\vec{\textbf{v}}$ to become
@@ -5286,7 +5287,88 @@ That should fix the issue:
    ](../images/vid-05-fixed-altitude-clamp.mp4 autoplay muted loop)
 
 ### Azimuth Control
-TODO: azimuth
+
+The same way we mapped vertical mouse movement (`dv`) to changes in altitude, we'll use horizontal
+movement `du` to change the control. We won't restrict the horizontal orbit the way we clamped the
+altitude angle and instead permit orbiting in either direction indefinitely. It still make sense
+to restrict the value to the $[0, 2\pi]$ range since floating-point precision decreases with
+large values.[^ch8-footnote3] Though instead of clamping the value we'll just let it wrap, so that
+an azimuth angle of $3\pi$ results in a value of $\pi$.
+
+In Rust, this is achieved with the arithmetic remainder operators `%` and `%=`. These support
+floating point numbers and retain the sign of the value that's on the left-hand side: for
+example, if the mouse moves left by $-\frac{5}{2}\pi$ (i.e. -450 degrees) the resulting angle will be
+$-\frac{1}{2}\pi$:
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+    impl Camera {
+        ...
+        pub fn orbit(&mut self, du: f32, dv: f32) {
+            const MAX_ALT: f32 = FRAC_PI_2 - 1e-6;
+            self.altitude = (self.altitude + dv).clamp(-MAX_ALT, MAX_ALT);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+            self.azimuth += du;
+            self.azimuth %= 2. * PI;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+            self.calculate_uniforms();
+        }
+        ...
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [camera-orbit-azimuth]: <kbd>[camera.rs]</kbd> Modifying the azimuth angle]
+
+We assigned the cosine of the altitude angle (i.e. $cos ~ \phi$) to the z-coordinate of the rotated
+$\vec{\textbf{w}}$. More generally, this quantity is equal to the length of a vector that results
+from projecting $\vec{\textbf{w}}$ onto the $xz$-plane (see Figure [orbit-camera-angles]). We can
+compute the $x$ and $z$ components of this vector from the azimuth angle as
+$(sin ~ \theta, 0, cos ~ \theta)$ scaled by the magnitude $cos ~ \phi$. Combining this with
+$sin ~ \phi$ for the $y$-coordinate we get:
+
+
+  $$
+     -\vec{\textbf{w}} =
+     \begin{bmatrix}
+      sin~\theta \cdot cos~\phi \\
+      sin~\phi \\
+      cos~\theta \cdot cos~\phi
+     \end{bmatrix}
+  $$
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+    impl Camera {
+        ...
+        fn calculate_uniforms(&mut self) {
+            let w = {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+                let (y, xz_scale) = self.altitude.sin_cos();
+                let (x, z) = self.azimuth.sin_cos();
+                -Vec3::new(x * xz_scale, y, z * xz_scale)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+            };
+            let origin = self.center - self.distance * w;
+            let u = w.cross(&self.up).normalized();
+            let v = u.cross(&w);
+            self.uniforms.origin = origin;
+            self.uniforms.u = u;
+            self.uniforms.v = v;
+            self.uniforms.w = w;
+        }
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [camera-orbit-azimuth-w]: <kbd>[camera.rs]</kbd> Computing $\vec{\textbf{w}}$ from azimuth and altitude]
+
+We can now rotate the camera horizontally and vertically around the center point:
+
+  ![Figure [camera-orbit-azimuth]: (video) Fixed altitude clamp
+   ](../images/vid-06-camera-orbit-azimuth.mp4 autoplay muted loop)
+
+[^ch8-footnote3]: As a floating point number gets larger, the precision goes down as
+there are fewer bits to represent the mantissa. This causes the smallest representable _increments_,
+also known as ULP or "Unit of Least Precision" to get larger. If you allow the azimuth angle to
+get arbitrarily large, you may find that the same increment in `du` results in a much faster
+camera rotation.
 
 ### Fixing Zoom
 TODO: fix zoom
