@@ -31,6 +31,15 @@ pub struct Camera {
 }
 
 impl Camera {
+    pub fn look_at(origin: Vec3, center: Vec3, up: Vec3) -> Camera {
+        let center_to_origin = origin - center;
+        let distance = center_to_origin.length().max(0.01); // Prevent distance of 0
+        let neg_w = center_to_origin.normalized();
+        let azimuth = neg_w.x().atan2(neg_w.z());
+        let altitude = neg_w.y().asin();
+        Self::with_spherical_coords(center, up, distance, azimuth, altitude)
+    }
+
     pub fn with_spherical_coords(
         center: Vec3,
         up: Vec3,
@@ -55,7 +64,8 @@ impl Camera {
     }
 
     pub fn zoom(&mut self, displacement: f32) {
-        self.uniforms.origin += displacement * self.uniforms.w;
+        self.distance -= displacement;
+        self.uniforms.origin = self.center - self.distance * self.uniforms.w;
     }
 
     pub fn pan(&mut self, du: f32, dv: f32) {

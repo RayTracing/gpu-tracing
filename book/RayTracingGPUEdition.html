@@ -5016,7 +5016,7 @@ the camera:
 For now, we are going to do away with `Camera::look_at` and introduce a new constructor called
 `Camera::with_spherical_coords`. This will compute the camera uniforms (i.e. the basis vectors and
 the origin) from the new parameters. Since we are going to need to re-compute
-the camera uniforms whenever the spherical coordinates change, let's factor that logic out to a
+the camera uniforms whenever the spherical coordinates change, let's factor out that logic in a
 helper called `Camera::calculate_uniforms`:
 
 
@@ -5079,7 +5079,12 @@ helper called `Camera::calculate_uniforms`:
         }
 
         pub fn zoom(&mut self, displacement: f32) {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust delete
             self.uniforms.origin += displacement * self.uniforms.w;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+            self.distance -= displacement;
+            self.uniforms.origin = self.center - self.distance * self.uniforms.w;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
         }
 
         pub fn pan(&mut self, du: f32, dv: f32) {
@@ -5370,12 +5375,40 @@ also known as ULP or "Unit of Least Precision" to get larger. If you allow the a
 get arbitrarily large, you may find that the same increment in `du` results in a much faster
 camera rotation.
 
-### Fixing Zoom
-TODO: fix zoom
-
 ### `Camera::look_at`
 
-TODO: look_at
+The new representation is in terms of spherical angles because this is convenient for computing
+movement over a sphere. Often we'll have a particular position in mind for the camera so it's nice
+to have a `Camera::look_at` function that takes an explicit camera origin. Let's bring it back and
+redefine it using the `with_spherical_coords` function. We can compute the altitude and azimuth
+angles from the `origin`, `center`, and `up` parameters:
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    impl Camera {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        pub fn look_at(origin: Vec3, center: Vec3, up: Vec3) -> Camera {
+            let center_to_origin = origin - center;
+            let distance = center_to_origin.length().max(0.01); // Prevent distance of 0
+            let neg_w = center_to_origin.normalized();
+            let azimuth = neg_w.x().atan2(neg_w.z());
+            let altitude = neg_w.y().asin();
+            Self::with_spherical_coords(center, up, distance, azimuth, altitude)
+        }
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+        pub fn with_spherical_coords(
+            center: Vec3,
+            up: Vec3,
+            distance: f32,
+            azimuth: f32,
+            altitude: f32,
+        ) -> Camera {
+            ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [camera-look-at-returns]: <kbd>[camera.rs]</kbd> Updated `Camera::look_at`]
+
+
                                (insert acknowledgments.md.html here)
 
 References
