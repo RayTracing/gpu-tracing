@@ -3392,13 +3392,13 @@ our large number of samples.
 
 Path Tracing
 ====================================================================================================
-What we perceive as color, shadows, transparency, reflections, and many other visual phenomena are
-the result of complex interactions of light. If we want to achieve some amount of realism, it makes
-sense to base our computations on the real-world physics of light.
+What we perceive as color, shadows, transparency, reflections, and many other visual phenomena
+result from interactions of light and matter. If we want to achieve some amount of realism, it makes
+sense to base our computations on the real-world physics of light. That said, it's not necessary to
+fully simulate electromagnetic wave interactions to render a visually pleasing image.
 
-That said, it's not necessary to simulate electromagnetic wave interactions to render a visually
-pleasing image. What we mainly care about is how light travels and what happens when it falls
-on surfaces in the scene. We'll adhere to a relatively simple model with the following assumptions:
+What we mainly care about is how light travels through the scene and what happens when it hits a
+surface. We'll adhere to a relatively simple model with the following assumptions:
 
 - Light travels in straight lines represented as rays.
 
@@ -3549,7 +3549,7 @@ for us:
 
     ...
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    [Listing [intersect-scene]: <kbd>[shaders.wgsl]</kbd> The intersect_scene function]
+    [Listing [intersect-scene]: <kbd>[shaders.wgsl]</kbd> The scatter function]
 
 
 The returned attenuation factor of $0.4$ means that the material absorbs 60% of the incoming
@@ -3632,13 +3632,13 @@ We can see some reflections but there are some nasty circular bands. This artifa
 floating point arithmetic. Sometimes the computed intersection point doesn't fall precisely on the
 sphere surface, which can cause the new ray (originating from that point) to re-intersect the sphere.
 
-An easy way to deal with this is to reject intersections for values of $t$ that are below a small
+A simple way to deal with this is to reject intersections for values of $t$ that are below a small
 offset ($\epsilon$ or _epsilon_):
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
     const FLT_MAX: f32 = 3.40282346638528859812e+38;
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
-    const EPSILON: f32 = 1e-3;
+    const EPSILON: f32 = 1e-2;
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
 
     ...
@@ -3673,10 +3673,10 @@ offset ($\epsilon$ or _epsilon_):
 
     ...
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    [Listing [intersect-scene]: <kbd>[shaders.wgsl]</kbd> The intersect_scene function]
+    [Listing [intersect-scene]: <kbd>[shaders.wgsl]</kbd> Rejecting intersections too close to the ray origin]
 
-This code considers both `t1` and `t2` as `t2` (the farther point) could be a valid intersection if
-the ray resulted from a surface _refraction_ (e.g. for a glass-like material). Following this
+The code considers both `t1` and `t2` as `t2` (the farther point) could be a valid intersection if
+the ray originated inside the sphere (e.g. for a glass-like material). Following this
 change, the rendering should look like this:
 
   ![Figure [shadow-acne-fixed]: Validating the path tracing loop
@@ -3686,6 +3686,34 @@ That looks much cleaner. Some reflections are visible and both spheres have acqu
 where light paths eventually reach the sky. Some light paths bounce back and forth between both
 spheres. Each bounce is an "absorption event" that decreases the path throughput. The image looks
 darker with more absorptions, which is most apparent where the two spheres meet.
+
+Rejecting intersections that are too close to the ray origin may not always prevent self-shadowing.
+When the ray direction is nearly tangent to the surface, the required threshold to reject points
+that lie on the surface can increase--especially when the ray origin has a large coordinate value
+with less floating point precision. For example, try increasing the radius of the lower sphere to
+10,000. This may result in some bad self-shadowing artifacts in the distance:
+
+  ![Figure [shadow-acne-fixed]: Self-shadowing in the distance
+   ](../images/img-28-shadow-acne-distance.png)
+
+An alternative way to avoid the issue is to perturb the ray origin away from the surface along
+the surface normal by a small amount. Since this moves the "entire ray" away from the object,
+self intersections are become less likely with an appropriate epsilon:
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    ...
+    fn scatter(input_ray: Ray, hit: Intersection) -> Scatter {
+      let reflected = reflect(input_ray.direction, hit.normal);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+      let output_ray = Ray(point_on_ray(input_ray, hit.t) + hit.normal * EPSILON, reflected);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+      let attenuation = vec3(0.4);
+      return Scatter(attenuation, output_ray);
+    }
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [intersect-scene]: <kbd>[shaders.wgsl]</kbd> Moving the ray origin away from the surface]
+
 
 Gamma Correction
 ----------------
@@ -5011,7 +5039,7 @@ the camera:
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     [Listing [camera-default-position]: <kbd>[main.rs]</kbd>]
 
-  ![Figure [four-spheres-orbit]: Four spheres for reference](../images/img-26-four-spheres.png)
+  ![Figure [four-spheres-orbit]: Four spheres for reference](../images/img-27-four-spheres.png)
 
 For now, we are going to do away with `Camera::look_at` and introduce a new constructor called
 `Camera::with_spherical_coords`. This will compute the camera uniforms (i.e. the basis vectors and
@@ -5082,7 +5110,7 @@ helper called `Camera::calculate_uniforms`:
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust delete
             self.uniforms.origin += displacement * self.uniforms.w;
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
-            self.distance -= displacement;
+            self.distance = (self.distance - displacement).max(0.0);  // Prevent negative distance
             self.uniforms.origin = self.center - self.distance * self.uniforms.w;
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
         }
@@ -5366,8 +5394,7 @@ $sin ~ \phi$ for the $y$-coordinate we get:
 
 We can now rotate the camera horizontally and vertically around the center point:
 
-  ![Figure [camera-orbit-azimuth]: (video) Fixed altitude clamp
-   ](../images/vid-06-camera-orbit-azimuth.mp4 autoplay muted loop)
+  ![Figure [camera-orbit-azimuth]: (video) Horizontal rotation](../images/vid-06-camera-orbit-azimuth.mp4 autoplay muted loop)
 
 [^ch8-footnote3]: As a floating point number gets larger, the precision goes down as
 there are fewer bits to represent the mantissa. This causes the smallest representable _increments_,

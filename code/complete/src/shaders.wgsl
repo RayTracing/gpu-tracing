@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: CC-BY-4.0
 
 const FLT_MAX: f32 = 3.40282346638528859812e+38;
-const EPSILON: f32 = 1e-3;
+const EPSILON: f32 = 1e-2;
 
 const MAX_PATH_LENGTH: u32 = 13u;
 
@@ -131,7 +131,7 @@ struct Scatter {
 
 fn scatter(input_ray: Ray, hit: Intersection) -> Scatter {
   let reflected = reflect(input_ray.direction, hit.normal);
-  let output_ray = Ray(point_on_ray(input_ray, hit.t), reflected);
+  let output_ray = Ray(point_on_ray(input_ray, hit.t) + hit.normal * EPSILON, reflected);
   let attenuation = hit.color;
   return Scatter(attenuation, output_ray);
 }

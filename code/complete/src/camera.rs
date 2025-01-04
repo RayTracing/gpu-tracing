@@ -64,7 +64,7 @@ impl Camera {
     }
 
     pub fn zoom(&mut self, displacement: f32) {
-        self.distance -= displacement;
+        self.distance = (self.distance - displacement).max(0.0);  // Prevent negative distance
         self.uniforms.origin = self.center - self.distance * self.uniforms.w;
     }
 
