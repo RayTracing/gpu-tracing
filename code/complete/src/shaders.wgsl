@@ -65,11 +65,11 @@ fn rand_f32() -> f32 {
 struct Intersection {
   normal: vec3f,
   t: f32,
-  color: vec3f,
+  material_index: u32,
 }
 
 fn no_intersection() -> Intersection {
-  return Intersection(vec3(0.), -1., vec3(0.));
+  return Intersection(vec3(0.), -1., 0);
 }
 
 fn is_intersection_valid(hit: Intersection) -> bool {
@@ -79,7 +79,7 @@ fn is_intersection_valid(hit: Intersection) -> bool {
 struct Sphere {
   center: vec3f,
   radius: f32,
-  color: vec3f,
+  material_index: u32,
 }
 
 fn intersect_sphere(ray: Ray, sphere: Sphere) -> Intersection {
@@ -105,7 +105,7 @@ fn intersect_sphere(ray: Ray, sphere: Sphere) -> Intersection {
 
   let p = point_on_ray(ray, t);
   let N = (p - sphere.center) / sphere.radius;
-  return Intersection(N, t, sphere.color);
+  return Intersection(N, t, sphere.material_index);
 }
 
 fn intersect_scene(ray: Ray) -> Intersection {
@@ -129,10 +129,10 @@ struct Scatter {
   ray: Ray,
 }
 
-fn scatter(input_ray: Ray, hit: Intersection) -> Scatter {
+fn scatter(input_ray: Ray, hit: Intersection, material: Material) -> Scatter {
   let reflected = reflect(input_ray.direction, hit.normal);
   let output_ray = Ray(point_on_ray(input_ray, hit.t) + hit.normal * EPSILON, reflected);
-  let attenuation = hit.color;
+  let attenuation = material.color;
   return Scatter(attenuation, output_ray);
 }
 
@@ -145,18 +145,26 @@ fn point_on_ray(ray: Ray, t: f32) -> vec3<f32> {
   return ray.origin + t * ray.direction;
 }
 
+struct Material {
+  color: vec3f,
+}
+
 fn sky_color(ray: Ray) -> vec3f {
   let t = 0.5 * (normalize(ray.direction).y + 1.);
   return (1. - t) * vec3(1.) + t * vec3(0.3, 0.5, 1.);
 }
 
-const OBJECT_COUNT: u32 = 4;
+const OBJECT_COUNT: u32 = 2;
 alias Scene = array<Sphere, OBJECT_COUNT>;
+alias Materials = array<Material, 1>;
+
+var<private> materials: Materials = Materials(
+  Material(/*color*/ vec3(0.5)),
+);
+
 var<private> scene: Scene = Scene(
-  Sphere(/*center*/ vec3(1., 0., -1.), /*radius*/ 0.5, /*color*/ vec3(0.5, 0.4, 0.)),
-  Sphere(/*center*/ vec3(-1., 0., -1.), /*radius*/ 0.5, /*color*/ vec3(0.2, 0.5, 0.2)),
-  Sphere(/*center*/ vec3(0., -1.1, -1.), /*radius*/ 0.5, /*color*/ vec3(0.7, 0.4, 0.6)),
-  Sphere(/*center*/ vec3(0.,  1.1, -1.), /*radius*/ 0.5, /*color*/ vec3(0.2, 0.2, 1.)),
+  Sphere(/*center*/ vec3(0., 0.5, 0.), /*radius*/ 0.5, /*material_index*/ 0),
+  Sphere(/*center*/ vec3(0., -2e4, -1.), /*radius*/ 2e4, /*material_index*/ 0),
 );
 
 @group(0) @binding(1) var radiance_samples_old: texture_2d<f32>;
@@ -207,7 +215,8 @@ var<private> vertices: TriangleVertices = TriangleVertices(
       break;
     }
 
-    let scattered = scatter(ray, hit);
+    let material = materials[hit.material_index];
+    let scattered = scatter(ray, hit, material);
     throughput *= scattered.attenuation;
     ray = scattered.ray;
     path_length += 1u;

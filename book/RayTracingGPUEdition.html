@@ -426,7 +426,7 @@ The types of the `Ok` and `Err` variants are generic:
         Err(E),
     }
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    [Figure [rust-result]: The `Result` type]
+    [Listing [rust-result]: The `Result` type]
 </script>
 
 `T` and `E` can be any type. It's common for a library to define its own error types to represent
@@ -5443,6 +5443,156 @@ angles from the `origin`, `center`, and `up` parameters:
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     [Listing [camera-look-at-returns]: <kbd>[camera.rs]</kbd> Updated `Camera::look_at`]
 
+
+Materials
+=========
+The `scatter` function that we defined in Section [path tracing] describes what happens when light
+interacts with a surface: some amount of the energy gets absorbed and the rest scatters off. This is
+represented in the return type (the `Scatter` struct) as an attenuation factor and a ray direction.
+
+The appearance of a real-world object depends on its material composition. This includes surface
+features--like the overall smoothness of the surface--and molecular properties like electrical
+conductivity and crystal structure. Generally we can get a way with an approximate representation
+of what makes an object appear like a metal or glass, with parameters that an artist can tune
+to achieve a particular appearance.
+
+We defined the first material parameter in Section [colored spheres]: color. We declared
+the material color as a field of the `Sphere` structure and used it to compute the attenuation
+factor in `scatter`. Let's introduce a new data structure `Material` and store the color there
+instead. We'll declare a separate array to store the `Material` instances and have each `Sphere`
+reference a material by its array index.
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+    struct Intersection {
+      normal: vec3f,
+      t: f32,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+      material_index: u32,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    }
+
+    fn no_intersection() -> Intersection {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+      return Intersection(vec3(0.), -1., 0);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    }
+
+    ...
+    struct Sphere {
+      center: vec3f,
+      radius: f32,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+      material_index: u32,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    }
+
+    fn intersect_sphere(ray: Ray, sphere: Sphere) -> Intersection {
+      ...
+      let p = point_on_ray(ray, t);
+      let N = (p - sphere.center) / sphere.radius;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+      return Intersection(N, t, sphere.material_index);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    }
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+    fn scatter(input_ray: Ray, hit: Intersection, material: Material) -> Scatter {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+      let reflected = reflect(input_ray.direction, hit.normal);
+      let output_ray = Ray(point_on_ray(input_ray, hit.t) + hit.normal * EPSILON, reflected);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+      let attenuation = material.color;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+      return Scatter(attenuation, output_ray);
+    }
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+    struct Material {
+      color: vec3f,
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+
+    fn sky_color(ray: Ray) -> vec3f {
+      let t = 0.5 * (normalize(ray.direction).y + 1.);
+      return (1. - t) * vec3(1.) + t * vec3(0.3, 0.5, 1.);
+    }
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+    const OBJECT_COUNT: u32 = 2;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    alias Scene = array<Sphere, OBJECT_COUNT>;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+    alias Materials = array<Material, 1>;
+
+    var<private> materials: Materials = Materials(
+      Material(/*color*/ vec3(0.5)),
+    );
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+
+    var<private> scene: Scene = Scene(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+      Sphere(/*center*/ vec3(0., 0.5, 0.), /*radius*/ 0.5, /*material_index*/ 0),
+      Sphere(/*center*/ vec3(0.,  -2e4, -1.), /*radius*/ 2e4, /*material_index*/ 0),
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    );
+    ...
+    @fragment fn display_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+      ...
+      var path_length = 0u;
+      while path_length < MAX_PATH_LENGTH {
+        let hit = intersect_scene(ray);
+        if !is_intersection_valid(hit) {
+          // If no intersection was found, return the color of the sky and terminate the path.
+          radiance_sample += throughput * sky_color(ray);
+          break;
+        }
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        let material = materials[hit.material_index];
+        let scattered = scatter(ray, hit, material);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+        throughput *= scattered.attenuation;
+        ray = scattered.ray;
+        path_length += 1u;
+      }
+      ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [materials-array]: <kbd>[camera.rs]</kbd> The materials array]
+</script>
+
+Storing the material separately allows multiple `Sphere` instances to reference the same material.
+This reduces the overall required memory when the number of spheres exceeds the available materials.
+Another advantage is that it reduces the size of an individual `Sphere` which is better for memory
+access performance. Note that the `scene` array gets accessed far more frequently during the search
+for an intersection while the `materials` array is only read from once an intersection has been
+found.
+
+I also rearranged the scene to contain two spheres that use the same material, with a very large
+sphere acting as the ground and with a small one touching the ground at the origin. Let's reposition
+the camera accordingly:
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+    async fn main() -> Result<()> {
+        ...
+        let (device, queue, surface) = connect_to_gpu(&window).await?;
+        let mut renderer = render::PathTracer::new(device, queue, WIDTH, HEIGHT);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        let mut camera = Camera::look_at(
+            Vec3::new(0., 0.55, 1.5),
+            Vec3::new(0., 0.5, 0.),
+            Vec3::new(0., 1., 0.),
+        );
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+        ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [reposition-camera-for-materials]: <kbd>[main.rs]</kbd>]
+
+  ![Figure [gray-spheres]: Gray mirror spheres](../images/img-29-gray-spheres.png)
 
                                (insert acknowledgments.md.html here)
 
