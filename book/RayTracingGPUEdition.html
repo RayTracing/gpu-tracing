@@ -3873,6 +3873,15 @@ intersection routine return the color of a sphere and use that color in the scat
     }
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
     ...
+    fn intersect_sphere(ray: Ray, sphere: Sphere) -> Intersection {
+      ...
+      let p = point_on_ray(ray, t);
+      let N = (p - sphere.center) / sphere.radius;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+      return Intersection(N, t, sphere.color);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    }
+
     fn intersect_scene(ray: Ray) -> Intersection {
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
       var closest_hit = no_intersection();
@@ -4299,7 +4308,7 @@ types[^ch8-footnote2] and it expects the memory layout of bound data structures 
 rules (see Table [scalar-and-vector-alignment]).
 
 
-     Type | Alignment | Size  
+     Type | Alignment | Size
     :----:|:---------:|:----:
     **u32, f32** |     4     | 4
       **vec2**   |     8     | 8
@@ -4451,7 +4460,7 @@ a series of cross products:
   $$
   \begin{aligned}
   \vec{\textbf{u}} &= \vec{\textbf{w}} \times \vec{\textbf{up}} \\
-  \vec{\textbf{v}} &= \vec{\textbf{u}} \times \vec{\textbf{w}} 
+  \vec{\textbf{v}} &= \vec{\textbf{u}} \times \vec{\textbf{w}}
   \end{aligned}
   $$
 
