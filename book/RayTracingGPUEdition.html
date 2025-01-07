@@ -4903,12 +4903,11 @@ mouse button gets pressed and released.
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
     ...
+    async fn main() -> Result<()> {
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
-    let mut mouse_button_pressed = false;
+        let mut mouse_button_pressed = false;
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
 
-    fn main() -> Result<()> {
-        ...
         event_loop.run(|event, control_handle| {
             control_handle.set_control_flow(ControlFlow::Poll);
             match event {
