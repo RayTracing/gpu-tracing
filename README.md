@@ -16,12 +16,28 @@ to draw the scenes from _Ray Tracing In One Weekend_ at near-interactive rates.
 
 Project Status
 --------------
-This book is a work-in-progress and has not been released yet. I'll update this README as soon as
-there is a first draft!
+This book is a work in progress. The following is the list of chapters planned for the first
+installment, including each chapter's status.
 
-Directory Structure
--------------------
-TODO
+| Chapter | Status |
+| ------- | ------ |
+| Introduction | ✍🏻 |
+| Windowing and GPU Setup | ✍🏻 |
+| Drawing Pixels | ✍🏻 |
+| Resource Bindings | ✍🏻 |
+| Ray Casting | ✍🏻 |
+| Temporal Accumulation | ✍🏻 |
+| Path Tracing | ✍🏻 |
+| Interactive Camera | ✍🏻 |
+| Materials | 📝 |
+| Scene Builder | 📝 |
+| Transforms and Instancing | |
+| Top Level BVH | |
+| Triangle Mesh | |
+| Sampling the Sun | |
+| Performance | |
+
+📝 = Work in progress  ✍🏻 = Draft
 
 Source Code
 -----------
@@ -51,9 +67,9 @@ following API and programming language choices for the code examples:
    virtually no effort to get the examples to run on different operating systems as the package
    manager takes care of this automatically.
 
-I'm cognizant of the fact Rust may feel unfamiliar to some readers. I will strive to keep the code
-examples free of esoteric Rust-isms to keep the code understandable to a reader who is familiar with
-C.
+I'm cognizant of the fact that Rust may feel unfamiliar to some readers. I will strive to keep the
+code examples free of esoteric Rust-isms to keep the code understandable to a reader who is familiar
+with C.
 
 That said, none of this should prevent you from implementing this book in your favorite language, on
 your favorite OS, using your favorite API. In fact, [wgpu](https://github.com/gfx-rs/wgpu/) (the
