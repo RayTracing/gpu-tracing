@@ -3519,9 +3519,11 @@ way in either direction. As such, our `scatter` function allows the `input_ray` 
 either an incident or a scattered light direction.
 
 Let's make the scattering function reflect the ray around the normal vector like a perfect mirror.
-The direction of a reflected ray given an incident ray direction and a surface normal is given by
-_Snell's Law_. Luckily, there is a handy shader instrinsic called `reflect` that can compute this
-for us:
+The law of reflection states that when a ray of light hits a surface, the angle of reflection--the
+angle between the reflected ray and the surface normal--is equal to the angle of incidence.
+The direction vector $\vec{R}$ of the reflected ray can be computed from the incident ray direction
+$\vec{\textbf{I}}$ as $\vec{\textbf{R}} = \vec{\textbf{I}}-2(\vec{\textbf{N}}\cdot\vec{\textbf{I}})\vec{\textbf{N}}$. Luckily, there is a handy shader
+instrinsic called `reflect` that implements this formula for us:
 
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
@@ -3712,7 +3714,7 @@ self intersections are become less likely with an appropriate epsilon:
     }
     ...
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    [Listing [intersect-scene]: <kbd>[shaders.wgsl]</kbd> Moving the ray origin away from the surface]
+    [Listing [offset-ray-origin-along-normal]: <kbd>[shaders.wgsl]</kbd> Moving the ray origin away from the surface]
 
 
 Gamma Correction
@@ -5463,56 +5465,56 @@ instead. We'll declare a separate array to store the `Material` instances and ha
 reference a material by its array index.
 
 <script type="preformatted">
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
     ...
     struct Intersection {
       normal: vec3f,
       t: f32,
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
       material_index: u32,
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
     }
 
     fn no_intersection() -> Intersection {
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
       return Intersection(vec3(0.), -1., 0);
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
     }
 
     ...
     struct Sphere {
       center: vec3f,
       radius: f32,
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
       material_index: u32,
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
     }
 
     fn intersect_sphere(ray: Ray, sphere: Sphere) -> Intersection {
       ...
       let p = point_on_ray(ray, t);
       let N = (p - sphere.center) / sphere.radius;
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
       return Intersection(N, t, sphere.material_index);
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
     }
     ...
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
     fn scatter(input_ray: Ray, hit: Intersection, material: Material) -> Scatter {
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
       let reflected = reflect(input_ray.direction, hit.normal);
       let output_ray = Ray(point_on_ray(input_ray, hit.t) + hit.normal * EPSILON, reflected);
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
       let attenuation = material.color;
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
       return Scatter(attenuation, output_ray);
     }
     ...
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
     struct Material {
       color: vec3f,
     }
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
 
     fn sky_color(ray: Ray) -> vec3f {
       let t = 0.5 * (normalize(ray.direction).y + 1.);
@@ -5520,23 +5522,23 @@ reference a material by its array index.
     }
 
 
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
     const OBJECT_COUNT: u32 = 2;
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
     alias Scene = array<Sphere, OBJECT_COUNT>;
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
     alias Materials = array<Material, 1>;
 
     var<private> materials: Materials = Materials(
       Material(/*color*/ vec3(0.5)),
     );
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
 
     var<private> scene: Scene = Scene(
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
       Sphere(/*center*/ vec3(0., 0.5, 0.), /*radius*/ 0.5, /*material_index*/ 0),
       Sphere(/*center*/ vec3(0.,  -2e4, -1.), /*radius*/ 2e4, /*material_index*/ 0),
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
     );
     ...
     @fragment fn display_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
@@ -5551,17 +5553,17 @@ reference a material by its array index.
         }
 
 
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
         let material = materials[hit.material_index];
         let scattered = scatter(ray, hit, material);
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
         throughput *= scattered.attenuation;
         ray = scattered.ray;
         path_length += 1u;
       }
       ...
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    [Listing [materials-array]: <kbd>[camera.rs]</kbd> The materials array]
+    [Listing [materials-array]: <kbd>[shaders.wgsl]</kbd> The materials array]
 </script>
 
 Storing the material separately allows multiple `Sphere` instances to reference the same material.
@@ -5593,6 +5595,53 @@ the camera accordingly:
     [Listing [reposition-camera-for-materials]: <kbd>[main.rs]</kbd>]
 
   ![Figure [gray-spheres]: Gray mirror spheres](../images/img-29-gray-spheres.png)
+
+Front or Back?
+--------------
+If you play around with the interactive camera (it's fun!) and end up inside one of the
+spheres, you are likely to see some artifacts. Not only can you partially see through the surface,
+the image just looks buggy overall.
+
+  ![Figure [inside-sphere-artifacts]: (video) Artifacts when the sphere is inside the sphere](../images/vid-07-back-face-bug.mp4 autoplay muted loop)
+
+Earlier we added a slight perturbation to the reflected ray origin along the surface normal (see
+Listing [offset-ray-origin-along-normal]). This was intended to prevent self-shadowing that can
+occur if the ray intersects the same sphere again. Unfortunately this doesn't work as intended if
+the incident ray originates inside the sphere. Since the surface normal points _outward_,
+the perturbation can push the ray origin "through" the surface. The reflected ray direction points
+inside the sphere but the ray intersects the surface near its origin and outside rather than
+somewhere else inside the sphere as one would expect.
+
+  ![Figure [flipped-normal]: The outward face normal and the flipped normal used for shading when the ray intersects the surface from behind](../images/fig-17-front-facing-normal.svg)
+
+If an intersection point lies inside the sphere then the reflected ray should originate on the
+inside. A very common approach is to flip the normal vector so that it always faces towards the side
+of the surface where the intersection occurred. The `intersect_scene` function returns a normal
+vector based on how we define the geometry. The side of the surface that is aligned with the
+geometry normal is often considered its "front face". When the ray intersects the front face, the ray
+direction and the normal vector oppose each other and their dot product is negative. If the
+intersection is on the front face, we'll simply use the normal as it is. Otherwise, we'll flip its
+direction by negating it:
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    ...
+    fn scatter(input_ray: Ray, hit: Intersection, material: Material) -> Scatter {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+      let is_front_face = dot(hit.normal, input_ray.direction) < 0.;
+      let N = select(-hit.normal, hit.normal, is_front_face);
+      let reflected = reflect(input_ray.direction, N);
+      let output_ray = Ray(point_on_ray(input_ray, hit.t) + N * EPSILON, reflected);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+      let attenuation = material.color;
+      return Scatter(attenuation, output_ray);
+    }
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [flip-normal-if-back-face]: <kbd>[shaders.wgsl]</kbd> Testing for front face to determine the shading normal]
+
+If you move the camera inside a sphere now, the image should appear completely black. This matches
+what one would expect from an opaque sphere with no light sources on the inside.
+
 
                                (insert acknowledgments.md.html here)
 

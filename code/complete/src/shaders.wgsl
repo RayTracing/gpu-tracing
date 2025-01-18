@@ -130,8 +130,10 @@ struct Scatter {
 }
 
 fn scatter(input_ray: Ray, hit: Intersection, material: Material) -> Scatter {
-  let reflected = reflect(input_ray.direction, hit.normal);
-  let output_ray = Ray(point_on_ray(input_ray, hit.t) + hit.normal * EPSILON, reflected);
+  let is_front_face = dot(hit.normal, input_ray.direction) < 0.;
+  let N = select(-hit.normal, hit.normal, is_front_face);
+  let reflected = reflect(input_ray.direction, N);
+  let output_ray = Ray(point_on_ray(input_ray, hit.t) + N * EPSILON, reflected);
   let attenuation = material.color;
   return Scatter(attenuation, output_ray);
 }
