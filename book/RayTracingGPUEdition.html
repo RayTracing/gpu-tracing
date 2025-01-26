@@ -3503,9 +3503,9 @@ new function responsible for traversing the scene and finding an intersection, c
     [Listing [intersect-scene]: <kbd>[shaders.wgsl]</kbd> The intersect_scene function]
 
 A second new function, called `scatter`, will be responsible for evaluating the surface material.
-For now it returns two values: an attenuation factor that represents the fraction of scattered
-radiance and a scattering direction (typically denoted with the lower-case Greek letter $\omega$).
-We store the attenuation factor as a `vec3f` since we're computing a separate radiance value for
+For now it returns two values: a scattering direction (typically denoted with the lower-case Greek
+letter $\omega$) and an attenuation factor that represents the material's reflectance
+in the direction of the incident ray. We store the attenuation as a `vec3f` since we're computing a separate radiance value for
 each color channel.[^ch7-footnote3] Surface materials (which we'll explore in Section [materials])
 are represented by various _scattering functions_. A scattering function maps an _incident_ light
 direction $\omega_i$ to an _outgoing_ light direction $\omega_o$.
@@ -5643,6 +5643,174 @@ If you move the camera inside a sphere now, the image should appear completely b
 what one would expect from an opaque sphere with no light sources on the inside.
 
 
+Diffuse BRDF
+------------
+The purpose of the `scatter` function is to choose the next segment in the light transport path at
+the point of intersection. An intersection point in the scene can potentially connect
+infinitely many transport path edges. This is analogous to the flow of light passing through the
+point: every path that touches the point yields a sample of the total energy that it contributes to
+the rendering.
+
+At the moment, `scatter` implements a surface that behaves like a perfectly smooth mirror. A
+perfectly _specular_ (i.e. mirror-like) surface reflects incident light from a given direction
+always at the same angle, which means we can compute the next transport path segment directly
+by reflecting the `input_ray` around the normal.
+
+A specular surface appears "shiny" because the reflected radiance varies with the viewing
+direction. In contrast, a matte surface reflects incident light diffusely at many angles, such
+that the apparent brightness of the surface doesn't vary that much
+with the viewing direction. An so called "ideal" matte or _diffuse_ surface exhibits _Lambertian
+reflectance_ in which the reflected radiance is the same in all directions.
+
+  ![Figure [lambertian-and-mirror-brdf-lobes]: The reflectance lobes for a perfectly specular (left) and a Lambertian diffuse (right) surface. A perfectly specular surface reflects the light beam from incident direction $\omega$ towards a single direction while a Lambertian diffuse surface reflects the beam equally in all directions. The same principle applies in reverse if we treat $\omega$ as the reflected/outgoing light direction.
+   ](../images/fig-16-lambertian-and-mirror-brdf-lobes.svg)
+
+To correctly render a diffuse surface we need to consider the entire hemisphere over which the
+surface receives light. This involves potentially tracing infinitely many rays in all directions
+and combining their radiance contributions. Tracing infinitely many rays at once to cover every
+fraction of a continuous hemisphere isn't plausible, however, sampling a large number of directions
+and taking their average over time works quite well. We already have the mechanism to distribute
+samples temporally -- all we need to do is pick a random direction (facing outward from the surface)
+as the next path segment. We can do so by uniformly sampling a point over the unit hemisphere that
+is aligned with the surface normal.
+
+Now we come to the attenuation. Our perfect mirror implementation directly returns the material
+color. We could do the same for the diffuse material and get a pretty decent result but there are a
+few things consider if the material should resemble an accurate Lambertian surface.
+
+Radiance is a term borrowed from radiometry that is defined as
+radiant power per unit surface area per unit solid angle[^ch9-footnote1]. The solid angle constrains
+the measured radiant power (the light energy per unit time) to a small set of directions and the
+surface area represents a unit patch of the reflecting surface. Intuitively, radiance is defined
+over a volume through space rather than a dimensionless ray. Hence, when discussing the flow of
+light energy, the intersection is typically treated as a tiny surface patch with non-zero area
+rather than a dimensionless point.
+
+  ![Figure [brdf-hemisphere]: The integration interval $\Omega$ and the differential solid angle $d\omega$. Radiance is defined as radiant flux (or power) arriving at $X$ via $d\omega$. $d\omega$ can be thought of a very constrained subset of directions among infinitely many over a hemosphere.
+   ](../images/fig-10-brdf-hemisphere.svg)
+
+A surface patch in 3D space has a different _apparent_ surface area when viewed from different
+angles. The surface appears largest when the view direction is parallel to the surface normal. When
+the view direction is exactly tangent to the surface, the patch is no longer visible. Radiance is
+defined as _per unit surface area_ so as the projected area shrinks at grazing angles, the computed
+radiance has to increase if the solid angle and the incoming radiant power don't change. In order to keep
+radiance equal in all directions, the attenuation should scale proportionally to the apparent surface
+area, decreasing down to zero when the surface is viewed at a 90 degree angle.
+
+According to _Lambert's projected area law_, the apparent surface area scales proportionally to the
+cosine of the angle between the surface normal and the viewing direction. For a sampled incident
+light direction $\omega$ (which is a unit vector) and surface normal $\vec{\textbf{N}}$ this is
+given by the absolute value of their dot product: $| \vec{\textbf{N}} \cdot \omega |$. We can
+simply multiply `material.color` by `dot(N, normalize(output_ray.direction))` and we'll have a
+Lambertian material.
+
+![Figure [lambert-photometria]: When viewed at an angle, the area $AB$ gets projected onto $AE$, which is smaller. This drawing is from Figure 1 in Johann Heinrich Lambert's "Photometria" [#Lambert1760].
+   ](../images/img-17-lambert-cosine-law-photometria.png)
+
+The material color here is an analog for _albedo_[^ch9-footnote2] which is defined as the ratio of
+the light reflected by the surface to the total amount of light that it receives.[^ch9-footnote3]
+Now, suppose that we have a function $I(\omega)$ that gives us the radiance arriving at (or leaving)
+a surface patch via direction $\omega$, where $\omega$ is a subset of the hemisphere of all light
+directions ($\Omega$). We can compute the total radiant power arriving at the patch by integrating
+$I$ over the hemisphere:
+
+$$
+  \int_\Omega I(\omega) ~ | \vec{\mathbf{N}} \cdot \omega | ~ d\omega
+$$
+
+Suppose now that $\omega_o$ represents a reflected light direction (i.e. `input_ray`) and $\omega_i$
+is a single direction from which light arrives at the surface. The reflected radiance $I(\omega_o)$
+is given by
+
+$$
+  I(\omega_o) = \int_\Omega f(\omega_o, \omega_i) ~ I(\omega_i) ~ | \vec{\mathbf{N}} \cdot \omega_i | ~ d\omega_i
+$$
+
+$f$ is a function that returns the reflectance of the surface material for a pair of incident and
+reflected light direction. The reflectance function for a perfect mirror returns 0 unless the two
+directions are mirror reflections of each other. The function for a Lambertian surface returns a
+constant value regardless of the directions. This function is also called a BRDF (for
+_Bi-directional Reflectance Distribution Function_).
+
+Let's ignore $I$ for a moment and only consider the Lambertian surface albedo. Replacing $f$ with
+the material color, the BRDF becomes a constant and we can pull it out of the integral:
+
+$$
+  albedo = color ~ \int_\Omega | \vec{\mathbf{N}} \cdot \omega | ~ d\omega
+$$
+
+The integral simply reduces to $\pi$[^ch9-footnote4] which leads to $albedo = \pi ~ color$. The
+Lambertian BRDF is typically defined as $\frac{color}{\pi}$ in order to make albedo equal to the
+material color. This is somewhat a matter of choice but we're going to stick with this definition
+in the rest of this book, such that the Lambertian attenuation for any two given light direction
+becomes
+
+$$
+  \frac{color}{\pi} ~ | \vec{\mathbf{N}} \cdot \omega_i |
+$$
+
+Except, we aren't computing the integral analytically but rather by random sampling using
+_Monte Carlo Integration_[^ch9-footnote5], so we also need to weigh each sample by its probability.
+Suppose we have some function $g(x)$ that we want to integrate over some domain $A$ by drawing $N$
+random samples from some probability distibution. The integral can be approximated as
+
+$$
+  \int_A g(x) ~ dx \approx \dfrac{1}{N}\sum_{\bar{\mathbf{x}}}^N \dfrac{g(\bar{\mathbf{x}})}{\rho(\bar{\mathbf{x}})}
+$$
+
+where $\rho(\bar{\mathbf{x}})$ is a probability distribution function (PDF) that was used to choose
+a random sample ($\bar{\mathbf{x}}$). When the sampling PDF is uniform, all samples get equal
+weight. If we uniformly sample the hemisphere, $\rho$ is a constant $\frac{1}{2\pi}$,[^ch9-footnote6]
+giving us
+
+$$
+  attenuation = \frac{\frac{color}{\pi} ~ | \vec{\mathbf{N}} \cdot \omega_i |}{\frac{1}{2\pi}} = 2 ~ color ~ | \vec{\mathbf{N}} \cdot \omega_i |
+$$
+
+This gives us a correct solution and the resulting albedo equals the material color. As it turns
+out, this isn't the most efficient sampling distribution. Think about the lower parts of the
+hemisphere where rays are almost tangent to the surface and the dot product is near zero. Radiance
+computed by tracing paths in these directions will get attenuated so much that they won't
+significantly contribute to the resulting image. Since these directions are somewhat "unimportant",
+sampling all directions with equal likelihood ends up wasting computation time.
+
+That's not to say that these directions don't contribute any radiance at all. We can sample
+them less frequently by picking a $\rho$ that is proportional to $| \vec{\mathbf{N}} \cdot \omega_i |$
+(i.e. weighted by the cosine of the angle between the two vectors) but we'll need to also weigh them
+more heavily to make up for the fact that they get sampled less frequently (hence the division by
+$\rho(\bar{\mathbf{x}})$ in the Monte Carlo formula).
+
+![Uniform hemispherical distribution](../images/fig-18-uniform-dist.png) ![Cosine-weighted hemispherical distribution](../images/fig-18-cosine-weighted-dist.png)
+
+Now here is the fun bit: we'll use a cosine-weighted distribution such that
+$\rho = \frac{|\vec{\mathbf{N}}\cdot\omega_i|}{\pi}.$[^ch9-footnote7] This is a very commonly used
+distribution for diffuse BRDFs. If we plug this into the formula for our attenuation factor we get:
+
+$$
+  attenuation = \frac{\frac{color}{\pi} ~ | \vec{\mathbf{N}} \cdot \omega_i |}{\frac{|\vec{\mathbf{N}}\cdot\omega_i|}{\pi}} = color
+$$
+
+This perfectly matches the Lambertian BRDF. Since the factors all cancel out we can use _color_
+as the attenuation and the distribution automatically weighs the samples proportionally.
+
+<br/>
+
+[^ch9-footnote1]: Radiance has units Watts per square meter per steradian ($\frac{W}{m^2 \cdot sr}$).
+"Steradian" is the unit of solid angle. It's analogous to radian but in 3D.
+
+[^ch9-footnote2]: [_Ray Tracing In One Weekend_][RTIOW], Chapter 10.3 Modeling Light Scatter and Reflectance.
+
+[^ch9-footnote3]: In terms of "radiant power leaving or arriving at a unit surface",
+albedo is the ratio of radiosity to irradiance.
+
+[^ch9-footnote4]: For a complete derivation, see the article ["Deriving Lambertian BRDF from first principles"](https://sakibsaikia.github.io/graphics/2019/09/10/Deriving-Lambertian-BRDF-From-First-Principles.html) by Sakib Saikia.
+
+[^ch9-footnote5]: For a refresher on Monte Carlo integration, take a look at [_Ray Tracing: The Rest of Your Life_][RTTROYL], Chapters 3 and 4.
+
+[^ch9-footnote6]: This follows from the surface area of a unit hemisphere is equal to $2\pi$.
+
+[^ch9-footnote7]: See [Physically Based-Rendering: From Theory To Implementation, 4th Edition, A.5.3 Cosine-Weighted Hemisphere Sampling](https://pbr-book.org/4ed/Sampling_Algorithms/Sampling_Multidimensional_Functions#Cosine-WeightedHemisphereSampling).
+
                                (insert acknowledgments.md.html here)
 
 References
@@ -5668,6 +5836,16 @@ References
 
 [^mcguire-codex]: https://graphicscodex.courses.nvidia.com/app.html
 
+[#Saikia]: Sakib Saikia "Deriving Lambertian BRDF from first principles", https://sakibsaikia.github.io/graphics/2019/09/10/Deriving-Lambertian-BRDF-From-First-Principles.html
+
+[#Pharr2023]: Matt Pharr, Wenzel Jakob, and Greg Humphreys, "Physically Based Rendering:From Theory To Implementation, 4th Edition"
+
+
+<!--
+TODO:
+- A Field Guide to BRDF Models, Stephen H. Westin Hongsong Li Kenneth E. Torrance 2004
+- hanrahan course on markov chain monte carlo PDF ?
+-->
 
 <!--
 @book{McGuire2024GraphicsCodex,
@@ -5679,6 +5857,19 @@ References
     url = {https://graphicscodex.com}
 }
 -->
+<!--
+@article {Matusik:2003,
+	author = "Wojciech Matusik and Hanspeter Pfister and Matt Brand and Leonard McMillan",
+	title = "A Data-Driven Reflectance Model",
+	journal = "ACM Transactions on Graphics",
+	year = "2003",
+	month = jul,
+	volume = "22",
+	number = "3",
+	pages = "759-769"
+}
+-->
+
 
 [Arman Uguray]:       https://github.com/armansito
 [Steve Hollasch]:     https://github.com/hollasch

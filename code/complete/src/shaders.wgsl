@@ -3,6 +3,8 @@
 
 const FLT_MAX: f32 = 3.40282346638528859812e+38;
 const EPSILON: f32 = 1e-2;
+const PI: f32 = 3.14159265358979323846264338327950288;
+const TWO_PI: f32 = 2. * PI;
 
 const MAX_PATH_LENGTH: u32 = 13u;
 
@@ -60,6 +62,13 @@ fn xorshift32() -> u32 {
 // subtraction. See Ray Tracing Gems II, Section 14.3.4.
 fn rand_f32() -> f32 {
   return bitcast<f32>(0x3f800000u | (xorshift32() >> 9u)) - 1.;
+}
+
+fn sample_sphere(u: vec2f) -> vec3f {
+  let z = 1. - 2. * u.x;
+  let r = sqrt(1. - z * z);
+  let phi = TWO_PI * u.y;
+  return vec3(r * cos(phi), r * sin(phi), z);
 }
 
 struct Intersection {
@@ -132,6 +141,8 @@ struct Scatter {
 fn scatter(input_ray: Ray, hit: Intersection, material: Material) -> Scatter {
   let is_front_face = dot(hit.normal, input_ray.direction) < 0.;
   let N = select(-hit.normal, hit.normal, is_front_face);
+//  let u = vec2(rand_f32(), rand_f32());
+//  let reflected = normalize(N + sample_sphere(u));
   let reflected = reflect(input_ray.direction, N);
   let output_ray = Ray(point_on_ray(input_ray, hit.t) + N * EPSILON, reflected);
   let attenuation = material.color;
