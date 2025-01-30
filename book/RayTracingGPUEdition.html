@@ -5805,9 +5805,9 @@ since a little simpler.
 
 ![Figure [cosine-weighted-hemisphere-samples]: The yellow points were uniformly sampled on a sphere. The blue points result from projecting to the yellow points to a hemisphere aligned with the sphere](../images/fig-19-tangent-sphere.svg)
 
-We'll start by sample two numbers between 0 and 1. We'll map one of these numbers to the
+We'll start by sampling two numbers between 0 and 1. We'll map one of these numbers to the
 $[-1, 1]$ range and use it as the $y$-coordinate. We'll map the other number to the $[0, 2]$ range
-and use it as the spherical azimuth angle for the $xz$-plane.
+and use it as the spherical azimuth angle on the $xz$-plane.
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
     const FLT_MAX: f32 = 3.40282346638528859812e+38;
@@ -5858,11 +5858,13 @@ Now let's update `scatter`:
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     [Listing [sample-lambertian]: <kbd>[shaders.wgsl]</kbd> Sampling the lambertian BRDF using the tangent sphere method]
 
-Note that the listing multiplies the sampled direction by `(1. - EPSILON)`. This is in order guard
-against an edge case in which if the sampled unit direction happens to be nearly opposite the normal
-vector, the length of the resulting direction can round down to 0 due to limited floating point
-precision. So we make the sampled direction just a little bit shorter to avoid 0-length vectors.
-This should give us two Lambertian spheres:
+Note that the listing multiplies the sampled direction by `(1. - EPSILON)`. This is to guard
+against an edge case in which the sampled unit direction is nearly opposite the normal
+vector. We make the length of the sampled vector slightly shorter than the normal, so that
+adding the two vectors doesn't result in a zero-length vector due to limited floating point
+precision.
+
+Making this change should give us two Lambertian spheres:
 
   ![Figure [lambertian-spheres]: Lambertian spheres](../images/img-30-lambertian-spheres.png)
 
