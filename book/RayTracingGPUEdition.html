@@ -5777,10 +5777,10 @@ sampling all directions with equal likelihood ends up wasting computation time.
 That's not to say that these directions don't contribute any radiance at all. We can sample
 them less frequently by picking a $\rho$ that is proportional to $| \vec{\mathbf{N}} \cdot \omega_i |$
 (i.e. weighted by the cosine of the angle between the two vectors) but we'll need to also weigh them
-more heavily to make up for the fact that they get sampled less frequently (hence the division by
-$\rho(\bar{\mathbf{x}})$ in the Monte Carlo formula).
+_higher_ to make up for the fact that we sampled those directions less frequently (hence the division
+by $\rho(\bar{\mathbf{x}})$ in the Monte Carlo formula).
 
-![Uniform hemispherical distribution](../images/fig-18-uniform-dist.png) ![Cosine-weighted hemispherical distribution](../images/fig-18-cosine-weighted-dist.png)
+![Uniform hemisphere distribution](../images/fig-18-uniform-dist.png) ![Cosine-weighted hemisphere distribution](../images/fig-18-cosine-weighted-dist.png)
 
 Now here is the fun bit: we'll use a cosine-weighted distribution such that
 $\rho = \frac{|\vec{\mathbf{N}}\cdot\omega_i|}{\pi}.$[^ch9-footnote7] This is a very commonly used
@@ -5790,8 +5790,82 @@ $$
   attenuation = \frac{\frac{color}{\pi} ~ | \vec{\mathbf{N}} \cdot \omega_i |}{\frac{|\vec{\mathbf{N}}\cdot\omega_i|}{\pi}} = color
 $$
 
-This perfectly matches the Lambertian BRDF. Since the factors all cancel out we can use _color_
-as the attenuation and the distribution automatically weighs the samples proportionally.
+This perfectly matches the Lambertian BRDF. Since the factors all cancel out, we can use _color_
+as the attenuation and the distribution inherently weighs the samples proportionally. There are a
+couple ways to sample a cosine-weighted hemisphere. One approach is to uniformly sample a 2D disk
+on the $xz$-plane and project the sampled point "up" to a hemisphere aligned with the $y-axis$.
+This produces a sampling direction in the "tangent space" of our surface patch which we'll have to
+rotate in a way that aligns the $y$-axis with the surface normal in the scene coordinate space.
+
+Another approach is to uniformly sample a sphere that sits tangent to the surface. This results in
+a cosine-weighted distribution when you project the point to the tangent hemisphere. This is also
+relatively simple to implement: sample the unit sphere to obtain a unit vector and add it to the
+surface normal. The resulting vector is our sampling direction. Let's implement this approach
+since a little simpler.
+
+![Figure [cosine-weighted-hemisphere-samples]: The yellow points were uniformly sampled on a sphere. The blue points result from projecting to the yellow points to a hemisphere aligned with the sphere](../images/fig-19-tangent-sphere.svg)
+
+We'll start by sample two numbers between 0 and 1. We'll map one of these numbers to the
+$[-1, 1]$ range and use it as the $y$-coordinate. We'll map the other number to the $[0, 2]$ range
+and use it as the spherical azimuth angle for the $xz$-plane.
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    const FLT_MAX: f32 = 3.40282346638528859812e+38;
+    const EPSILON: f32 = 1e-2;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+    const TWO_PI: f32 = 6.2831853;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    ...
+    fn rand_f32() -> f32 {
+      return bitcast<f32>(0x3f800000u | (xorshift32() >> 9u)) - 1.;
+    }
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+    // Uniformly sample a unit sphere centered at the origin
+    fn sample_sphere() -> vec3f {
+      let r0 = rand_f32();
+      let r1 = rand_f32();
+
+      // Map r0 to [-1, 1]
+      let y = 1. - 2. * r0;
+
+      // Compute the projected radius on the xz-plane using Pythagorean theorem
+      let xz_r = sqrt(1. - y * y);
+
+      let phi = TWO_PI * r1;
+      return vec3(xz_r * cos(phi), y, xz_r * sin(phi));
+    }
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [sample-sphere]: <kbd>[shaders.wgsl]</kbd> The `sample_sphere` function]
+
+Now let's update `scatter`:
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    ...
+    fn scatter(input_ray: Ray, hit: Intersection, material: Material) -> Scatter {
+      let is_front_face = dot(hit.normal, input_ray.direction) < 0.;
+      let N = select(-hit.normal, hit.normal, is_front_face);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+      let reflected = normalize(N + (1. - EPSILON) * sample_sphere());
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+      let output_ray = Ray(point_on_ray(input_ray, hit.t) + N * EPSILON, reflected);
+      let attenuation = material.color;
+      return Scatter(attenuation, output_ray);
+    }
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [sample-lambertian]: <kbd>[shaders.wgsl]</kbd> Sampling the lambertian BRDF using the tangent sphere method]
+
+Note that the listing multiplies the sampled direction by `(1. - EPSILON)`. This is in order guard
+against an edge case in which if the sampled unit direction happens to be nearly opposite the normal
+vector, the length of the resulting direction can round down to 0 due to limited floating point
+precision. So we make the sampled direction just a little bit shorter to avoid 0-length vectors.
+This should give us two Lambertian spheres:
+
+  ![Figure [lambertian-spheres]: Lambertian spheres](../images/img-30-lambertian-spheres.png)
+
 
 <br/>
 
@@ -5835,6 +5909,8 @@ References
 [#Saikia]: Sakib Saikia "Deriving Lambertian BRDF from first principles", https://sakibsaikia.github.io/graphics/2019/09/10/Deriving-Lambertian-BRDF-From-First-Principles.html
 
 [#Pharr2023]: Matt Pharr, Wenzel Jakob, and Greg Humphreys, "Physically Based Rendering:From Theory To Implementation, 4th Edition"
+
+[#Shirley2019]: Peter Shirley et al, [Sampling Transformations Zoo](https://research.nvidia.com/labs/rtr/publication/shirley2019sampling/)
 
 [^ericson]: C. Ericson, Real Time Collision Detection
 

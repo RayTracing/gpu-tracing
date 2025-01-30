@@ -37,9 +37,9 @@ def sphere_plot(n):
         pys.append(y / l)
         pzs.append((pz / l) - 1)
 
- #       pxs.append(x / l)
- #       pys.append(y / l)
- #       pzs.append(-pz / l - 1)
+        #pxs.append(x / l)
+        #pys.append(y / l)
+        #pzs.append(-pz / l - 1)
 
     return [xs, ys, zs, pxs, pys, pzs]
 
@@ -51,7 +51,7 @@ ax = fig.add_subplot(projection='3d')
 
 n = 1000
 plot = sphere_plot(n)
-#ax.scatter(plot[0], plot[1], plot[2], marker='o', s=2, c="#FFC107", alpha=0.8)
+ax.scatter(plot[0], plot[1], plot[2], marker='o', s=2, c="#FFC107", alpha=0.8)
 ax.scatter(plot[3], plot[4], plot[5], marker='o', s=2, c="#1E88E5", alpha=0.5)
 
 # For each set of style and range settings, plot n random points in the box
