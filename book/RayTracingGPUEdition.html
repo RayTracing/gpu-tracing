@@ -3640,7 +3640,7 @@ offset ($\epsilon$ or _epsilon_):
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
     const FLT_MAX: f32 = 3.40282346638528859812e+38;
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
-    const EPSILON: f32 = 1e-2;
+    const EPSILON: f32 = 1e-3;
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
 
     ...
@@ -3688,34 +3688,6 @@ That looks much cleaner. Some reflections are visible and both spheres have acqu
 where light paths eventually reach the sky. Some light paths bounce back and forth between both
 spheres. Each bounce is an "absorption event" that decreases the path throughput. The image looks
 darker with more absorptions, which is most apparent where the two spheres meet.
-
-Rejecting intersections that are too close to the ray origin may not always prevent self-shadowing.
-When the ray direction is nearly tangent to the surface, the required threshold to reject points
-that lie on the surface can increase--especially when the ray origin has a large coordinate value
-with less floating point precision. For example, try increasing the radius of the lower sphere to
-10,000. This may result in some bad self-shadowing artifacts in the distance:
-
-  ![Figure [shadow-acne-fixed]: Self-shadowing in the distance
-   ](../images/img-28-shadow-acne-distance.png)
-
-An alternative way to avoid the issue is to perturb the ray origin away from the surface along
-the surface normal by a small amount. Since this moves the "entire ray" away from the object,
-self intersections are become less likely with an appropriate epsilon:
-
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
-    ...
-    fn scatter(input_ray: Ray, hit: Intersection) -> Scatter {
-      let reflected = reflect(input_ray.direction, hit.normal);
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
-      let output_ray = Ray(point_on_ray(input_ray, hit.t) + hit.normal * EPSILON, reflected);
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
-      let attenuation = vec3(0.4);
-      return Scatter(attenuation, output_ray);
-    }
-    ...
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    [Listing [offset-ray-origin-along-normal]: <kbd>[shaders.wgsl]</kbd> Moving the ray origin away from the surface]
-
 
 Gamma Correction
 ----------------
@@ -5503,7 +5475,7 @@ reference a material by its array index.
     fn scatter(input_ray: Ray, hit: Intersection, material: Material) -> Scatter {
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
       let reflected = reflect(input_ray.direction, hit.normal);
-      let output_ray = Ray(point_on_ray(input_ray, hit.t) + hit.normal * EPSILON, reflected);
+      let output_ray = Ray(point_on_ray(input_ray, hit.t), reflected);
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
       let attenuation = material.color;
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
@@ -5537,7 +5509,7 @@ reference a material by its array index.
     var<private> scene: Scene = Scene(
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
       Sphere(/*center*/ vec3(0., 0.5, 0.), /*radius*/ 0.5, /*material_index*/ 0),
-      Sphere(/*center*/ vec3(0.,  -2e4, -1.), /*radius*/ 2e4, /*material_index*/ 0),
+      Sphere(/*center*/ vec3(0.,  -2e2 - EPSILON, 0.), /*radius*/ 2e2, /*material_index*/ 0),
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
     );
     ...
@@ -5573,8 +5545,8 @@ access performance. Note that the `scene` array gets accessed far more frequentl
 for an intersection while the `materials` array is only read from once an intersection has been
 found.
 
-I also rearranged the scene to contain two spheres that use the same material, with a very large
-sphere acting as the ground and with a small one touching the ground at the origin. Let's reposition
+I also rearranged the scene to contain two spheres that use the same material, with a larger
+sphere acting as the ground and a small one touching the ground at the origin. Let's reposition
 the camera accordingly:
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
@@ -5595,52 +5567,6 @@ the camera accordingly:
     [Listing [reposition-camera-for-materials]: <kbd>[main.rs]</kbd>]
 
   ![Figure [gray-spheres]: Gray mirror spheres](../images/img-29-gray-spheres.png)
-
-Front or Back
--------------
-If you play around with the interactive camera (it's fun!) and end up inside one of the
-spheres, you are likely to see some artifacts. Not only can you partially see through the surface,
-the image just looks buggy overall.
-
-  ![Figure [inside-sphere-artifacts]: (video) Artifacts when the sphere is inside the sphere](../images/vid-07-back-face-bug.mp4 autoplay muted loop)
-
-Earlier we added a slight perturbation to the reflected ray origin along the surface normal (see
-Listing [offset-ray-origin-along-normal]). This was intended to prevent self-shadowing that can
-occur if the ray intersects the same sphere again. Unfortunately this doesn't work as intended if
-the incident ray originates inside the sphere. Since the surface normal points _outward_,
-the perturbation can push the ray origin "through" the surface. The reflected ray direction points
-inside the sphere but the ray intersects the surface near its origin and outside rather than
-somewhere else inside the sphere as one would expect.
-
-  ![Figure [flipped-normal]: The outward face normal and the flipped normal used for shading when the ray intersects the surface from behind](../images/fig-17-front-facing-normal.svg)
-
-If an intersection point lies inside the sphere then the reflected ray should originate on the
-inside. A very common approach is to flip the normal vector so that it always faces towards the side
-of the surface where the intersection occurred. The `intersect_scene` function returns a normal
-vector based on how we define the geometry. The side of the surface that is aligned with the
-geometry normal is often considered its "front face". When the ray intersects the front face, the ray
-direction and the normal vector oppose each other and their dot product is negative. If the
-intersection is on the front face, we'll simply use the normal as it is. Otherwise, we'll flip its
-direction by negating it:
-
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
-    ...
-    fn scatter(input_ray: Ray, hit: Intersection, material: Material) -> Scatter {
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
-      let is_front_face = dot(hit.normal, input_ray.direction) < 0.;
-      let N = select(-hit.normal, hit.normal, is_front_face);
-      let reflected = reflect(input_ray.direction, N);
-      let output_ray = Ray(point_on_ray(input_ray, hit.t) + N * EPSILON, reflected);
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
-      let attenuation = material.color;
-      return Scatter(attenuation, output_ray);
-    }
-    ...
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    [Listing [flip-normal-if-back-face]: <kbd>[shaders.wgsl]</kbd> Testing for front face to determine the shading normal]
-
-If you move the camera inside a sphere now, the image should appear completely black. This matches
-what one would expect from an opaque sphere with no light sources on the inside.
 
 
 Diffuse BRDF
@@ -5811,7 +5737,7 @@ and use it as the spherical azimuth angle on the $xz$-plane.
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
     const FLT_MAX: f32 = 3.40282346638528859812e+38;
-    const EPSILON: f32 = 1e-2;
+    const EPSILON: f32 = 1e-3;
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
     const TWO_PI: f32 = 6.2831853;
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
@@ -5845,12 +5771,10 @@ Now let's update `scatter`:
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
     ...
     fn scatter(input_ray: Ray, hit: Intersection, material: Material) -> Scatter {
-      let is_front_face = dot(hit.normal, input_ray.direction) < 0.;
-      let N = select(-hit.normal, hit.normal, is_front_face);
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
-      let reflected = normalize(N + (1. - EPSILON) * sample_sphere());
+      let reflected = normalize(hit.normal + (1. - EPSILON) * sample_sphere());
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
-      let output_ray = Ray(point_on_ray(input_ray, hit.t) + N * EPSILON, reflected);
+      let output_ray = Ray(point_on_ray(input_ray, hit.t), reflected);
       let attenuation = material.color;
       return Scatter(attenuation, output_ray);
     }
