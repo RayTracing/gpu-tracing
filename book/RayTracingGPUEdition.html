@@ -5792,6 +5792,90 @@ Making this change should give us two Lambertian spheres:
 
   ![Figure [lambertian-spheres]: Lambertian spheres](../images/img-30-lambertian-spheres.png)
 
+You may see a little bit of noise at first but the image should resolve fast if you have a decent
+GPU. The noise will be a lot more noticeable when you move the camera since the accumulated samples
+in the radiance texture get reset on input events. While we did this to avoid ghosting, the noise
+is just as undesirable in a real-time application. There are strategies to reduce the noise but
+we are not going to cover them in this book.
+
+  ![Figure [noise-camera-movement]: (video) Noise is visible when accumulation texture gets cleared](../images/vid-08-noise-lambertian.mp4 autoplay muted loop)
+
+We now have two material types to choose from. Let's add a new field to the `Material` structure
+that stores the type of reflectance the material exhibits. For now let's declare this as an integer
+with "1" representing specular and "0" representing lambertian. We can use this to create a scene
+with both kinds of material with various colors:
+
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+    fn sample_perfectly_specular(input_dir: vec3f, normal: vec3f) -> vec3f {
+      return reflect(input_dir, normal);
+    }
+
+    fn sample_lambertian(input_dir: vec3f, normal: vec3f) -> vec3f {
+      return normal + sample_sphere() * (1. - EPSILON);
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+
+    fn scatter(input_ray: Ray, hit: Intersection, material: Material) -> Scatter {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+      var reflected: vec3f;
+      if material.specular == 1 {
+        reflected = sample_perfectly_specular(input_ray.direction, hit.normal);
+      } else {
+        reflected = sample_lambertian(input_ray.direction, hit.normal);
+      }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+      let output_ray = Ray(point_on_ray(input_ray, hit.t), reflected);
+      let attenuation = material.color;
+      return Scatter(attenuation, output_ray);
+    }
+
+    ...
+
+    struct Material {
+      color: vec3f,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+      specular: u32,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    }
+
+    fn sky_color(ray: Ray) -> vec3f {
+      let t = 0.5 * (normalize(ray.direction).y + 1.);
+      return (1. - t) * vec3(1.) + t * vec3(0.3, 0.5, 1.);
+    }
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+    const OBJECT_COUNT: u32 = 3;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    alias Scene = array<Sphere, OBJECT_COUNT>;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+    alias Materials = array<Material, OBJECT_COUNT>;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+
+    var<private> materials: Materials = Materials(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+      Material(/*color*/ vec3(0.7, 0.5, 0.5), /*specular*/1),
+      Material(/*color*/ vec3(0.5, 0.5, 0.9), /*specular*/0),
+      Material(/*color*/ vec3(0.7, 0.9, 0.2), /*specular*/0),
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    );
+
+    var<private> scene: Scene = Scene(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+      Sphere(/*center*/ vec3(-0.6, 0.5, 0.), /*radius*/ 0.5, /*material_index*/ 0),
+      Sphere(/*center*/ vec3(0.6, 0.5, 0.), /*radius*/ 0.5, /*material_index*/ 1),
+      Sphere(/*center*/ vec3(0., -2e2 - EPSILON, 0.), /*radius*/ 2e2, /*material_index*/ 2),
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    );
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [select-material]: <kbd>[shaders.wgsl]</kbd> Lambertian and specular spheres]
+</script>
+
+  ![Figure [lambertian-and-specular-spheres]: Lambertian and specular spheres](../images/img-31-specular-and-lambertian.png)
 
 <br/>
 
