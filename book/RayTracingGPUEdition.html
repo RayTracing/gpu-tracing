@@ -5798,7 +5798,7 @@ in the radiance texture get reset on input events. While we did this to avoid gh
 is just as undesirable in a real-time application. There are strategies to reduce the noise but
 we are not going to cover them in this book.
 
-  ![Figure [noise-camera-movement]: (video) Noise is visible when accumulation texture gets cleared](../images/vid-08-noise-lambertian.mp4 autoplay muted loop)
+  ![Figure [noise-camera-movement]: (video) We see noise when the accumulation texture gets cleared](../images/vid-08-noise-lambertian.mp4 autoplay muted loop)
 
 We now have two material types to choose from. Let's add a new field to the `Material` structure
 that stores the type of reflectance the material exhibits. For now let's declare this as an integer
@@ -5876,6 +5876,11 @@ with both kinds of material with various colors:
 </script>
 
   ![Figure [lambertian-and-specular-spheres]: Lambertian and specular spheres](../images/img-31-specular-and-lambertian.png)
+
+The diffuse surfaces appear matte and featureless but their overall shade still varies based on
+their surroundings. This applies to their color too: try setting the color of the diffuse sphere on the
+right to white (i.e. `vec3f(1.)`). It will appear greener in the bottom half where it gets
+illuminated by the ground and bluer in the upper half where it faces the sky.
 
 <br/>
 
