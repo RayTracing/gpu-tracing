@@ -145,8 +145,12 @@ struct Scatter {
   ray: Ray,
 }
 
-fn sample_perfectly_specular(input_dir: vec3f, normal: vec3f) -> vec3f {
+fn sample_perfectly_specular_reflection(input_dir: vec3f, normal: vec3f) -> vec3f {
   return reflect(input_dir, normal);
+}
+
+fn sample_perfectly_specular_refraction(input_dir: vec3f, normal: vec3f, ior: f32) -> vec3f {
+  return refract(input_dir, normal, ior);
 }
 
 fn sample_lambertian(input_dir: vec3f, normal: vec3f) -> vec3f {
@@ -154,13 +158,49 @@ fn sample_lambertian(input_dir: vec3f, normal: vec3f) -> vec3f {
 }
 
 fn scatter(input_ray: Ray, hit: Intersection, material: Material) -> Scatter {
-  var reflected: vec3f;
-  if material.specular == 1 {
-    reflected = sample_perfectly_specular(input_ray.direction, hit.normal);
+  var scattered: vec3f;
+  if material.specular_or_ior > 0. {
+    scattered = reflect(input_ray.direction, hit.normal);
+  } else if material.specular_or_ior < 0. {
+    let ior = abs(material.specular_or_ior);
+    scattered = refract(input_ray.direction, hit.normal, ior);
   } else {
-    reflected = sample_lambertian(input_ray.direction, hit.normal);
+    scattered = sample_lambertian(input_ray.direction, hit.normal);
   }
-  let output_ray = Ray(point_on_ray(input_ray, hit.t), reflected);
+  let output_ray = Ray(point_on_ray(input_ray, hit.t), scattered);
+  let attenuation = material.color;
+  return Scatter(attenuation, output_ray);
+}
+
+fn scatter_goal(input_ray: Ray, hit: Intersection, material: Material) -> Scatter {
+  let incident = normalize(input_ray.direction); // TODO: I
+  let incident_dot_normal = dot(incident, hit.normal);
+  let is_front_face = incident_dot_normal < 0.;
+
+  let cos_theta = abs(incident_dot_normal);
+  let sin_theta = sqrt(1. - cos_theta * cos_theta);
+  let N = select(-hit.normal, hit.normal, is_front_face);
+
+  // `ior` and `refraction_ratio` only have meaning if the material is transmissive.
+  let is_transmissive = material.specular_or_ior < 0.;
+  let ior = abs(material.specular_or_ior);
+  let refraction_ratio = select(ior, 1. / ior, is_front_face);  // TODO: III
+  let cannot_refract = refraction_ratio * sin_theta > 1.; // TODO: II
+  // 0: refract, no front face, ray not normalized: NaN propagation, black hole
+  // I: refract, no front face, ray normalized: NaN propagation
+  // II: refract, but guard against total internal reflection (case when refract returns 0)
+  // III: fix ior: front face
+
+  var scattered: vec3f;
+  if material.specular_or_ior > 0. || (is_transmissive && cannot_refract) {
+    scattered = reflect(incident, N);
+  } else if is_transmissive {
+    scattered = refract(incident, N, refraction_ratio);
+  } else {
+    scattered = sample_lambertian(incident, N);
+  }
+
+  let output_ray = Ray(point_on_ray(input_ray, hit.t), scattered);
   let attenuation = material.color;
   return Scatter(attenuation, output_ray);
 }
@@ -176,7 +216,7 @@ fn point_on_ray(ray: Ray, t: f32) -> vec3<f32> {
 
 struct Material {
   color: vec3f,
-  specular: u32,
+  specular_or_ior: f32,
 }
 
 fn sky_color(ray: Ray) -> vec3f {
@@ -184,19 +224,23 @@ fn sky_color(ray: Ray) -> vec3f {
   return (1. - t) * vec3(1.) + t * vec3(0.3, 0.5, 1.);
 }
 
-const OBJECT_COUNT: u32 = 3;
+const OBJECT_COUNT: u32 = 4;
 alias Scene = array<Sphere, OBJECT_COUNT>;
 alias Materials = array<Material, OBJECT_COUNT>;
 
 var<private> materials: Materials = Materials(
-  Material(/*color*/ vec3(0.7, 0.5, 0.5), /*specular*/1),
-  Material(/*color*/ vec3(0.5, 0.5, 0.9), /*specular*/0),
-  Material(/*color*/ vec3(0.7, 0.9, 0.2), /*specular*/0),
+  Material(/*color*/ vec3(0.7, 0.5, 0.5), /*specular_or_ior*/1.),
+  Material(/*color*/ vec3(0.5, 0.5, 0.9), /*specular_or_ior*/0.),
+  Material(/*color*/ vec3(0.7, 0.9, 0.2), /*specular_or_ior*/0.),
+  Material(/*color*/ vec3(1.), /*specular_or_ior*/-1.49),
 );
 
 var<private> scene: Scene = Scene(
-  Sphere(/*center*/ vec3(-0.6, 0.5, 0.), /*radius*/ 0.5, /*material_index*/ 0),
-  Sphere(/*center*/ vec3(0.6, 0.5, 0.), /*radius*/ 0.5, /*material_index*/ 1),
+  Sphere(/*center*/ vec3(-1.1, 0.5, 0.), /*radius*/ 0.5, /*material_index*/ 0),
+  Sphere(/*center*/ vec3(0., 0.5, 0.), /*radius*/ 0.5, /*material_index*/ 1),
+  Sphere(/*center*/ vec3(1.1, 0.5, 0.), /*radius*/ 0.5, /*material_index*/ 3),
+
+  // Ground
   Sphere(/*center*/ vec3(0., -2e2 - EPSILON, 0.), /*radius*/ 2e2, /*material_index*/ 2),
 );
 
