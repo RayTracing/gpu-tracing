@@ -177,6 +177,12 @@ div.indented {
     image-rendering: crisp-edges;
 }
 
+.md img.small-gif {
+    margin-top: 1em;
+    width: 48ex;
+    image-rendering: crisp-edges;
+}
+
 .md video {
     margin-top: 1em;
     width: 72ex;

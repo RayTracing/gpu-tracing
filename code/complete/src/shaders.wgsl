@@ -145,22 +145,21 @@ struct Scatter {
   ray: Ray,
 }
 
-fn sample_perfectly_specular(input_dir: vec3f, normal: vec3f) -> vec3f {
-  return reflect(input_dir, normal);
-}
-
 fn sample_lambertian(input_dir: vec3f, normal: vec3f) -> vec3f {
   return normal + sample_sphere() * (1. - EPSILON);
 }
 
 fn scatter(input_ray: Ray, hit: Intersection, material: Material) -> Scatter {
-  var reflected: vec3f;
-  if material.specular == 1 {
-    reflected = sample_perfectly_specular(input_ray.direction, hit.normal);
+  var scattered: vec3f;
+  if material.specular_or_ior > 0. {
+    scattered = reflect(input_ray.direction, hit.normal);
+  } else if material.specular_or_ior < 0. {
+    let ior = abs(material.specular_or_ior);
+    scattered = refract(input_ray.direction, hit.normal, ior);
   } else {
-    reflected = sample_lambertian(input_ray.direction, hit.normal);
+    scattered = sample_lambertian(input_ray.direction, hit.normal);
   }
-  let output_ray = Ray(point_on_ray(input_ray, hit.t), reflected);
+  let output_ray = Ray(point_on_ray(input_ray, hit.t), scattered);
   let attenuation = material.color;
   return Scatter(attenuation, output_ray);
 }
@@ -176,7 +175,7 @@ fn point_on_ray(ray: Ray, t: f32) -> vec3<f32> {
 
 struct Material {
   color: vec3f,
-  specular: u32,
+  specular_or_ior: f32,
 }
 
 fn sky_color(ray: Ray) -> vec3f {
@@ -184,19 +183,23 @@ fn sky_color(ray: Ray) -> vec3f {
   return (1. - t) * vec3(1.) + t * vec3(0.3, 0.5, 1.);
 }
 
-const OBJECT_COUNT: u32 = 3;
+const OBJECT_COUNT: u32 = 4;
 alias Scene = array<Sphere, OBJECT_COUNT>;
 alias Materials = array<Material, OBJECT_COUNT>;
 
 var<private> materials: Materials = Materials(
-  Material(/*color*/ vec3(0.7, 0.5, 0.5), /*specular*/1),
-  Material(/*color*/ vec3(0.5, 0.5, 0.9), /*specular*/0),
-  Material(/*color*/ vec3(0.7, 0.9, 0.2), /*specular*/0),
+  Material(/*color*/ vec3(0.7, 0.5, 0.5), /*specular_or_ior*/1.),
+  Material(/*color*/ vec3(0.5, 0.5, 0.9), /*specular_or_ior*/0.),
+  Material(/*color*/ vec3(0.7, 0.9, 0.2), /*specular_or_ior*/0.),
+  Material(/*color*/ vec3(1.), /*specular_or_ior*/-1.5),
 );
 
 var<private> scene: Scene = Scene(
-  Sphere(/*center*/ vec3(-0.6, 0.5, 0.), /*radius*/ 0.5, /*material_index*/ 0),
-  Sphere(/*center*/ vec3(0.6, 0.5, 0.), /*radius*/ 0.5, /*material_index*/ 1),
+  Sphere(/*center*/ vec3(-1.1, 0.5, 0.), /*radius*/ 0.5, /*material_index*/ 0),
+  Sphere(/*center*/ vec3(0., 0.5, 0.),   /*radius*/ 0.5, /*material_index*/ 1),
+  Sphere(/*center*/ vec3(1.1, 0.5, 0.),  /*radius*/ 0.5, /*material_index*/ 3),
+
+  // Ground
   Sphere(/*center*/ vec3(0., -2e2 - EPSILON, 0.), /*radius*/ 2e2, /*material_index*/ 2),
 );
 

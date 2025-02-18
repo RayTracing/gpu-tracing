@@ -108,12 +108,14 @@ _**please review the [CONTRIBUTING][] document for the most effective way to pro
 
 This work  is licensed under a
 [Creative Commons Attribution 4.0 International License][cc-by]. You can find a copy of the license
-text at [LICENSE][]
+text in the [LICENSE][] file. All images and figures are original works with the exception of a few borrowings,
+which have been credited in [images/README.md][]
 
 [![CC BY 4.0][cc-by-image]][cc-by]
 
 [CONTRIBUTING]: CONTRIBUTING.md
 [LICENSE]: LICENSE
+[images/README.md]: images/README.md
 [cc-by]: http://creativecommons.org/licenses/by/4.0/
 [cc-by-image]: https://i.creativecommons.org/l/by/4.0/88x31.png
 [cc-by-shield]: https://img.shields.io/badge/License-CC%20BY%204.0-lightgrey.svg
