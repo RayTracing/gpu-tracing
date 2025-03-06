@@ -145,19 +145,31 @@ struct Scatter {
   ray: Ray,
 }
 
-fn sample_lambertian(input_dir: vec3f, normal: vec3f) -> vec3f {
+fn sample_lambertian(normal: vec3f) -> vec3f {
   return normal + sample_sphere() * (1. - EPSILON);
 }
 
 fn scatter(input_ray: Ray, hit: Intersection, material: Material) -> Scatter {
+  let incident = normalize(input_ray.direction);
+  let incident_dot_normal = dot(incident, hit.normal);
+  let is_front_face = incident_dot_normal < 0.;
+  let N = select(-hit.normal, hit.normal, is_front_face);
+  let cos_theta = abs(incident_dot_normal);
+
+  // `ior`, `ref_ratio`, and `cannot_refract` only have meaning if the material is transmissive.
+  let is_transmissive = material.specular_or_ior < 0.;
+  let is_specular = material.specular_or_ior > 0.;
+  let ior = abs(material.specular_or_ior);
+  let ref_ratio = select(ior, 1. / ior, is_front_face);
+  let cannot_refract = ref_ratio * ref_ratio * (1.0 - cos_theta * cos_theta) > 1.;
+
   var scattered: vec3f;
-  if material.specular_or_ior > 0. {
-    scattered = reflect(input_ray.direction, hit.normal);
-  } else if material.specular_or_ior < 0. {
-    let ior = abs(material.specular_or_ior);
-    scattered = refract(input_ray.direction, hit.normal, ior);
+  if is_specular || (is_transmissive && cannot_refract) {
+    scattered = reflect(incident, N);
+  } else if is_transmissive {
+    scattered = refract(incident, N, ref_ratio);
   } else {
-    scattered = sample_lambertian(input_ray.direction, hit.normal);
+    scattered = sample_lambertian(N);
   }
   let output_ray = Ray(point_on_ray(input_ray, hit.t), scattered);
   let attenuation = material.color;
