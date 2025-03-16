@@ -5316,6 +5316,14 @@ example, if the mouse moves left by $-\frac{5}{2}\pi$ (i.e. -450 degrees) the re
 $-\frac{1}{2}\pi$:
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    use {
+        bytemuck::{Pod, Zeroable},
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust delete
+        std::f32::consts::FRAC_PI_2,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        std::f32::consts::{FRAC_PI_2, PI},
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    };
     ...
     impl Camera {
         ...
@@ -5426,7 +5434,7 @@ represented in the return type (the `Scatter` struct) as an attenuation factor a
 
 The appearance of a real-world object depends on its material composition. This includes surface
 features--like the overall smoothness of the surface--and molecular properties like electrical
-conductivity and crystal structure. Generally we can get a way with an approximate representation
+conductivity and crystal structure. Generally we can get away with an approximate representation
 of what makes an object appear like a metal or glass, with parameters that an artist can tune
 to achieve a particular appearance.
 
@@ -6269,7 +6277,7 @@ Let's run this now:
 
 The issue with NaN/INF values is gone and we now see a mirror reflection where the blue ring used to be. The image is
 still wrong though, as there is now a black circle in the middle again. In the black region, the camera ray refracts
-into the sphere but the rest of the light transport path gets stuck in a total internal reflection loop. Tha path
+into the sphere but the rest of the light transport path gets stuck in a total internal reflection loop. The path
 tracing loop eventually exits without reaching the sky, hence the black.
 
 ### Fixing the refraction ratio
