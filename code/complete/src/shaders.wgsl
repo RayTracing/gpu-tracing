@@ -149,6 +149,13 @@ fn sample_lambertian(normal: vec3f) -> vec3f {
   return normal + sample_sphere() * (1. - EPSILON);
 }
 
+fn schlick_fresnel(ior: f32, cos_theta: f32) -> f32 {
+  let u = 1 - cos_theta;
+  let sqrt_f0 = (ior - 1.) / (ior + 1.);
+  let f0 = sqrt_f0 * sqrt_f0;
+  return mix(f0, 1., u * u * u * u * u);
+}
+
 fn scatter(input_ray: Ray, hit: Intersection, material: Material) -> Scatter {
   let incident = normalize(input_ray.direction);
   let incident_dot_normal = dot(incident, hit.normal);
@@ -156,15 +163,22 @@ fn scatter(input_ray: Ray, hit: Intersection, material: Material) -> Scatter {
   let N = select(-hit.normal, hit.normal, is_front_face);
   let cos_theta = abs(incident_dot_normal);
 
-  // `ior`, `ref_ratio`, and `cannot_refract` only have meaning if the material is transmissive.
+  // `ior` and `ref_ratio` only have meaning if the material is transmissive.
   let is_transmissive = material.specular_or_ior < 0.;
-  let is_specular = material.specular_or_ior > 0.;
   let ior = abs(material.specular_or_ior);
   let ref_ratio = select(ior, 1. / ior, is_front_face);
-  let cannot_refract = ref_ratio * ref_ratio * (1.0 - cos_theta * cos_theta) > 1.;
+
+  // Determine whether to use specular reflection.
+  var is_specular: bool;
+  if is_transmissive {
+      let cannot_refract = ref_ratio * ref_ratio * (1.0 - cos_theta * cos_theta) > 1.;
+      is_specular = cannot_refract || schlick_fresnel(ref_ratio, cos_theta) > rand_f32();
+  } else {
+      is_specular = material.specular_or_ior > 0.;
+  }
 
   var scattered: vec3f;
-  if is_specular || (is_transmissive && cannot_refract) {
+  if is_specular {
     scattered = reflect(incident, N);
   } else if is_transmissive {
     scattered = refract(incident, N, ref_ratio);

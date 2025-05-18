@@ -5907,7 +5907,7 @@ albedo is the ratio of radiosity to irradiance.
 
 Specular Transmission
 ---------------------
-We have so far focused only on the reflected portion of scattered light and assumed the rest simply gets absorbed into
+We have so far focused only on the reflected portion of scattered light and assumed the rest gets absorbed into
 the material. This approach results in surfaces that are opaque, though some materials (such as glass, water, and air)
 transmit light without fully absorbing it. These materials can appear transparent or translucent according to certain
 physical properties, including how smooth the surface is and how light interacts with its molecules.
@@ -6366,8 +6366,183 @@ the total internal reflection case but the black sphere inside should look diffe
 
 [^ch9-footnote15]: See WGSL Specification, Section 15.7.2 "Differences from IEEE-754" (https://www.w3.org/TR/WGSL/#differences-from-ieee754)
 
+Dielectric BSDF
+---------------
+Most materials exhibit a mixture of transmission and reflection. Water and glass are both mostly transparent when viewed
+head on but appear increasingly more mirror-like at grazing angles. The mechanisms that give rise to this effect depend
+on the physical properties of the surface material as well as the wavelength and polarization of the incident light.
+Rendering such a surface accurately would require us to compute both the reflected and transmitted radiance and combine
+them using some view-dependent ratio that is plausible for what we want to simulate.
+
+A common method to compute this ratio is to use the Fresnel equations.[^ch9-footnote16] The Fresnel equations relate
+the surface reflectance (i.e. the reflected
+portion of the incident beam) to the angle of incidence and the indices of refraction at the surface
+interface.[^ch9-footnote17]
+
+Light is fundamentally a wave of oscillations in the electromagnetic field and the
+orientation of these oscillations are called _polarizations_. Reflection and transmission are dependent on
+the incident polarization, so the Fresnel equations come in a pair that define reflectance separately for the
+two orthogonal linear polarizations relative to the _plane of incidence_[^ch9-footnote18], i.e. the "perpendicular"
+($\bot$) and "parallel" ($\parallel$) polarizations:
+
+$$
+R_{\parallel} = \left(\frac{\eta ~ cos ~ \theta_i - cos ~ \theta_t}{\eta ~ cos ~ \theta_i + cos ~ \theta_t}\right)^2, ~
+R_{\bot} = \left(\frac{cos ~ \theta_i - \eta ~ cos ~ \theta_t}{ cos ~ \theta_i + \eta ~ cos ~ \theta_t}\right)^2
+$$
+
+where $\eta$ is the relative index of refraction, $\theta_i$ is the angle of the incident ray, and $\theta_t$ is angle
+of refraction given by Snell's law. We can implement these equations directly for a system that takes
+polarization into account. We can also take their average to derive a single unpolarized
+_Fresnel reflectance_ factor.[^ch9-footnote17] Alternately, we can resort to an approximation that looks good enough
+and save on computation.
+
+We defined a valid index of refraction (i.e. a negative valued `specular_or_ior`) in the `Material` type to
+mean that the surface is transparent and refractive. In reality, opaque materials can have an index of refraction too.
+Stainless steel -- which visually appears reflective when viewed from any direction -- has a complex-valued refractive
+index. The real part represents the change in phase velocity and the imaginary part represents how rapidly
+light gets absorbed by the material, known as the _absorption coefficient_. Electrical conductors (like metals) have a
+high absorption coefficient for visible light. _Dielectrics_ (which are electrical insulators) generally tend to have a
+low absorption coefficient for visible wavelengths.
+
+The Fresnel equations can be solved for both metals and dielectrics using complex arithmetic but we'll simplify things.
+We'll assume that an index of refraction is only present for a dielectric and ignore the absorption coefficient (i.e.
+pretend that its value is $0$). We are also going to ignore polarization. Next, instead of solving the equations above
+we'll use a very commonly used approximation called _Schlick's Formula_.[^ch9-footnote19] The formula defines Fresnel
+reflectance $F$ for incident angle $\theta_i$ as:
+
+$$
+  F(\theta_i) = F_0 + (F_{90} - F_0) ~ (1 - cos ~ \theta_i)^5
+$$
+
+$F_0$ is reflectance at _normal incidence_ (i.e. 0 degrees) where the surface appears the least reflective. $F_{90}$ is
+the reflectance at 90 degrees. We'll define $F_{90}$ to be $1$, meaning all materials will exhibit perfect reflectance
+at a tangent angle (i.e. transmission is 0):
+
+$$
+  F(\theta_i) = F_0 + (1 - F_0) ~ (1 - cos ~ \theta_i)^5
+$$
+
+For dielectrics (for which the absorption coefficient is $0$), $F_0$ can be computed from the real-valued index of
+refraction:
+
+$$
+F_0 = \left(\frac{\eta - 1}{\eta + 1}\right)^2
+$$
+
+Let's quickly translate this to code. If you look closely, the Schlick formula blends between $F_0$ and $1$ using
+$(1 - cos ~ \theta_i)^5$ as the blend factor. This is a simple enough expression that you can just type it out exactly,
+or use the [`mix`](https://www.w3.org/TR/WGSL/#mix-builtin) intrinsic:
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+    fn schlick_fresnel(ior: f32, cos_theta: f32) -> f32 {
+      let u = 1 - cos_theta;
+      let sqrt_f0 = (ior - 1.) / (ior + 1.);
+      let f0 = sqrt_f0 * sqrt_f0;
+      return mix(f0, 1., u * u * u * u * u);
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [schlick-fresnel]: <kbd>[shaders.wgsl]</kbd> The `schlick_fresnel` function]
+
+Now, if the material is transmissive we need to compute the contributions from both the refracted
+and reflected paths and blend them with our fresnel factor. This would involve tracing both paths
+all the way to a light source. This is difficult to do in our current setup in which the loop in
+the shader's entry point iterates over a single path and invokes `scatter` once for every path
+segment.
+
+Let's imagine the combined reflection and transmission distributions (i.e. the BRDF and BTDF) for
+a dielectric as a unified _BSDF_ (i.e. a Bi-directional _scattering_ distribution function). The
+Fresnel factor represents the relative proportion of reflected and transmitted rays, in other words
+it is the likelihood that a ray gets reflected instead of transmitted.[^ch9-footnote20]
+
+After the check for total internal reflection we are going to randomly decide whether to reflect or
+refract using the Fresnel reflectance as the probability of reflecting. This choice of probability
+actually fits well into our Monte Carlo framework, in that we are selecting a distribution that
+closely matches the BSDF in much the same way as our choice of the cosine-weighted hemisphere
+distribution for the Lambertian BRDF.
+
+With that, let's reorganize the code to make flow control clear. We'll repurpose the `is_specular`
+variable to represent whether we chose specular reflection over other scattering types (and not
+just based on `material.specular_or_ior`):
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    ...
+    fn scatter(input_ray: Ray, hit: Intersection, material: Material) -> Scatter {
+      let incident = normalize(input_ray.direction);
+      let incident_dot_normal = dot(incident, hit.normal);
+      let is_front_face = incident_dot_normal < 0.;
+      let N = select(-hit.normal, hit.normal, is_front_face);
+      let cos_theta = abs(incident_dot_normal);
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+      // `ior` and `ref_ratio` only have meaning if the material is transmissive.
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+      let is_transmissive = material.specular_or_ior < 0.;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL delete
+      let is_specular = material.specular_or_ior > 0.;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+      let ior = abs(material.specular_or_ior);
+      let ref_ratio = select(ior, 1. / ior, is_front_face);
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+      // Determine whether to use specular reflection.
+      var is_specular: bool;
+      if is_transmissive {
+          let cannot_refract = ref_ratio * ref_ratio * (1.0 - cos_theta * cos_theta) > 1.;
+          is_specular = cannot_refract || schlick_fresnel(ref_ratio, cos_theta) > rand_f32();
+      } else {
+          is_specular = material.specular_or_ior > 0.;
+      }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+
+      var scattered: vec3f;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+      if is_specular {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+        scattered = reflect(incident, N);
+      } else if is_transmissive {
+        scattered = refract(incident, N, ref_ratio);
+      } else {
+        scattered = sample_lambertian(N);
+      }
+      let output_ray = Ray(point_on_ray(input_ray, hit.t), scattered);
+      let attenuation = material.color;
+      return Scatter(attenuation, output_ray);
+    }
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [specular-dielectric-bsdf]: <kbd>[shaders.wgsl]</kbd> Implementing a perfect specular dielectric BSDF]
+
+Note that due to WGSL's short-circuiting rules, the call to `schlick_fresnel` won't evaluate if `cannot_refract`
+is true, skipping the computation at angles of total internal reflection.
+
+ ![Figure [dielectric-bsdf]: Specular Dielectric BSDF](../images/img-36-dielectric-bsdf.png)
+
+Here is another look from a different angle. Notice that the reflection of the sky is more prominent on the fringes:
+
+ ![Figure [dielectric-bsdf]: Specular Dielectric BSDF](../images/img-37-dielectric-bsdf-up-close.png)
+
+
+[^ch9-footnote16]: Augustin-Jean Fresnel was an early-19th-century physicist. His work on diffraction and polarization
+reinforced the theory that light behaves like a wave. He also invented the "Fresnel Lens" -- a type of lighthouse reflector
+made of concentric prisms that combine reflection and refraction to focus the beacon.
+
+[^ch9-footnote17]: See [Physically Based Rendering: From Theory To Implementation, 4th Edition, 9.3.5 "Specular Reflection and Transmission, The Fresnel Equations"](https://pbr-book.org/4ed/Reflection_Models/Specular_Reflection_and_Transmission#TheFresnelEquations)
+
+[^ch9-footnote18]: https://en.wikipedia.org/wiki/Plane_of_incidence
+
+[^ch9-footnote19]: Christophe Schlick published this approximation in his paper titled "An Inexpensive BRDF Model for Physically-based Rendering" ([#Schlick1994]), in which he builds on an earlier approximation by Cook and Torrance in their seminal paper "A Reflectance Model for Computer Graphics" ([#CookTorrance1982]). They observed that the complex index of refraction (including the absorption coefficient) is often unknown for all wavelengths in the visible spectrum. Schlick argued that even when the values are known, the precision gained by directly solving the Fresnel equations is not worth the computational cost.
+
+[^ch9-footnote20]: See [Physically Based Rendering: From Theory To Implementation, 4th Edition, 9.5 "Dielectric BSDF"](https://pbr-book.org/4ed/Reflection_Models/Dielectric_BSDF)
+
 <!--
-[^ch9-footnote12]: See [Physically Based Rendering: From Theory To Implementation, 4th Edition, 9.3.1 "Specular Reflection and Transmission: Physical Principles"](https://pbr-book.org/4ed/Reflection_Models/Specular_Reflection_and_Transmission#PhysicalPrinciples)
 -->
 
                                (insert acknowledgments.md.html here)
@@ -6375,27 +6550,31 @@ the total internal reflection case but the black sphere inside should look diffe
 References
 ==========
 
-[#Marsaglia03] George Marsaglia, [*Xorshift RNGs*](https://www.jstatsoft.org/article/download/v008i14/916), 2003
+[#Marsaglia03]: George Marsaglia, [*Xorshift RNGs*](https://www.jstatsoft.org/article/download/v008i14/916), 2003
 
-[#Jenkins13] Bob Jenkins, [*A hash function for hash Table lookup*](https://www.burtleburtle.net/bob/hash/doobs.html), 2013
+[#Jenkins13]: Bob Jenkins, [*A hash function for hash Table lookup*](https://www.burtleburtle.net/bob/hash/doobs.html), 2013
 
-[#Hughes13] J.F. Hughes, A. van Dam, M. McGuire, D.F. Sklar, J.D. Foley, S.K. Feiner, K. Akeley *Computer Graphics: Principles and Practice, 3rd Edition, Section 1.6*
+[#Hughes13]: J.F. Hughes, A. van Dam, M. McGuire, D.F. Sklar, J.D. Foley, S.K. Feiner, K. Akeley *Computer Graphics: Principles and Practice, 3rd Edition, Section 1.6*
 
-[#AlanWolfe2024] Alan Wolfe ["Beyond White Noise for Real-Time Rendering"](https://youtu.be/tethAU66xaA?si=qIPEwF5XTm8kO3tF)
+[#AlanWolfe2024]: Alan Wolfe [*Beyond White Noise for Real-Time Rendering*](https://youtu.be/tethAU66xaA?si=qIPEwF5XTm8kO3tF)
 
-[#Immel86] David S. Immel, Michael F. Cohen, Donald P. Greenberg *A Radiosity Method For Non-Diffuse Environments*
+[#Immel86]: David S. Immel, Michael F. Cohen, Donald P. Greenberg *A Radiosity Method For Non-Diffuse Environments*
 
-[#Kajiya86] James T. Kajiya *The Rendering Equation*, 1986
+[#Kajiya86]: James T. Kajiya *The Rendering Equation*, 1986
 
-[#Lambert1760] Johann Heinrich Lambert, *Photometria sive de mensura et gradibus luminis, colorum et umbrae*, 1760. Courtesy of ETH-Bibliothek Zürich, Switzerland.
+[#Lambert1760]: Johann Heinrich Lambert, *Photometria sive de mensura et gradibus luminis, colorum et umbrae*, 1760. Courtesy of ETH-Bibliothek Zürich, Switzerland.
 
-[#McGuire2024GraphicsCodex] Morgan McGuire, *The Graphics Codex*, 2024
+[#McGuire2024GraphicsCodex]: Morgan McGuire, *The Graphics Codex*, 2024
 
-[#Saikia] Sakib Saikia ["Deriving Lambertian BRDF from first principles"](https://sakibsaikia.github.io/graphics/2019/09/10/Deriving-Lambertian-BRDF-From-First-Principles.html)
+[#Saikia]: Sakib Saikia [*Deriving Lambertian BRDF from first principles*](https://sakibsaikia.github.io/graphics/2019/09/10/Deriving-Lambertian-BRDF-From-First-Principles.html)
 
-[#Pharr2023] Matt Pharr, Wenzel Jakob, and Greg Humphreys, "Physically Based Rendering:From Theory To Implementation, 4th Edition"
+[#Pharr2023]: Matt Pharr, Wenzel Jakob, and Greg Humphreys, *Physically Based Rendering: From Theory To Implementation, 4th Edition*
 
-[#Shirley2019] Peter Shirley et al, [Sampling Transformations Zoo](https://research.nvidia.com/labs/rtr/publication/shirley2019sampling/)
+[#Shirley2019]: Peter Shirley et al, [*Sampling Transformations Zoo*](https://research.nvidia.com/labs/rtr/publication/shirley2019sampling/)
+
+[#CookTorrance1982]: Robert L. Cook, Kenneth E. Torrance, *A Reflectance Model for Computer Graphics*, 1982
+
+[#Schlick1994]: Christophe Schlick, *An Inexpensive BRDF Model for Physically-based Rendering*, 1994
 
 [^ericson]: C. Ericson, Real Time Collision Detection
 
