@@ -6456,18 +6456,20 @@ segment.
 
 Let's imagine the combined reflection and transmission distributions (i.e. the BRDF and BTDF) for
 a dielectric as a unified _BSDF_ (i.e. a Bi-directional _scattering_ distribution function). The
-Fresnel factor represents the relative proportion of reflected and transmitted rays, in other words
-it is the likelihood that a ray gets reflected instead of transmitted.[^ch9-footnote20]
+Fresnel factor represents the relative distribution of reflected and transmitted rays, in other
+words it is the likelihood that a ray gets reflected instead of transmitted.[^ch9-footnote20] As we
+have done for other distributions, we can sample the BSDF one segment at a time and integrate the
+result over time.
 
 After the check for total internal reflection we are going to randomly decide whether to reflect or
 refract using the Fresnel reflectance as the probability of reflecting. This choice of probability
 actually fits well into our Monte Carlo framework, in that we are selecting a distribution that
 closely matches the BSDF in much the same way as our choice of the cosine-weighted hemisphere
-distribution for the Lambertian BRDF.
+distribution matches the Lambertian BRDF.
 
-With that, let's reorganize the code to make flow control clear. We'll repurpose the `is_specular`
-variable to represent whether we chose specular reflection over other scattering types (and not
-just based on `material.specular_or_ior`):
+With that, let's reorganize the code to make the flow control more clear. We'll repurpose the
+`is_specular` variable to represent whether we chose specular reflection over other scattering types
+(and not just based on `material.specular_or_ior`):
 
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
