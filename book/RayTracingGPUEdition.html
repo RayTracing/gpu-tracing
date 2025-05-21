@@ -6404,6 +6404,9 @@ light gets absorbed by the material, known as the _absorption coefficient_. Elec
 high absorption coefficient for visible light. _Dielectrics_ (which are electrical insulators) generally tend to have a
 low absorption coefficient for visible wavelengths.
 
+Schlick Approximation
+---------------------
+
 The Fresnel equations can be solved for both metals and dielectrics using complex arithmetic but we'll simplify things.
 We'll assume that an index of refraction is only present for a dielectric and ignore the absorption coefficient (i.e.
 pretend that its value is $0$). We are also going to ignore polarization. Next, instead of solving the equations above
@@ -6531,6 +6534,86 @@ Here is another look from a different angle. Notice that the reflection of the s
 
  ![Figure [dielectric-bsdf]: Specular Dielectric BSDF](../images/img-37-dielectric-bsdf-up-close.png)
 
+### Dielectric Material Color
+
+Let's say we want to add a color tint to the glass sphere. Let's set the material color to black:
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    ...
+    var<private> materials: Materials = Materials(
+      Material(/*color*/ vec3(0.7, 0.5, 0.5), /*specular_or_ior*/1.),
+      Material(/*color*/ vec3(0.5, 0.5, 0.9), /*specular_or_ior*/0.),
+      Material(/*color*/ vec3(0.7, 0.9, 0.2), /*specular_or_ior*/0.),
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+      Material(/*color*/ vec3(0.), /*specular_or_ior*/-1.5),
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    );
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [black-dielectric-code]: <kbd>[shaders.wgsl]</kbd> Defining a black glass material]
+</script>
+
+This will result in an image like this:
+
+ ![Figure [black-dielectric-bad]: Black dielectric without Fresnel reflectance](../images/img-38-black-dielectric-bad.png)
+
+That doesn't look like glass as it is missing the sheen that's characteristic of dielectrics. Even if the base color is
+defined as black, the dielectric material should appear somewhat reflective. Remember that we are currently using the
+material color directly as the attenuation factor but ideally the attenuation should match the reflectance given by
+the Fresnel equations. Given that $F_{90}$ is $1$, we should see a mirror reflection of all color channels without
+attenuation at grazing angles, and see more of the color of the material at $F_0$.[^ch9-footnote21]
+
+Let's special case the Fresnel reflection and set the attenuation to $1$. Since our sampling probability matches the
+Fresnel reflectance, the attenuation will interpolate between the base color and $1$ based on the viewing angle:
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    ...
+    fn scatter(input_ray: Ray, hit: Intersection, material: Material) -> Scatter {
+      ...
+      // Determine whether to use specular reflection.
+      var is_specular: bool;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+      var attenuation = material.color;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+      if is_transmissive {
+          let cannot_refract = ref_ratio * ref_ratio * (1.0 - cos_theta * cos_theta) > 1.;
+          is_specular = cannot_refract || schlick_fresnel(ref_ratio, cos_theta) > rand_f32();
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+          if is_specular {
+            attenuation = vec3(1.);
+          }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+      } else {
+          is_specular = material.specular_or_ior > 0.;
+      }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+
+      var scattered: vec3f;
+      if is_specular {
+        scattered = reflect(incident, N);
+      } else if is_transmissive {
+        scattered = refract(incident, N, ref_ratio);
+      } else {
+        scattered = sample_lambertian(N);
+      }
+      let output_ray = Ray(point_on_ray(input_ray, hit.t), scattered);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL delete
+      let attenuation = material.color;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+      return Scatter(attenuation, output_ray);
+    }
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [specular-reflectance-for-dielectrics]: <kbd>[shaders.wgsl]</kbd> Fixing the specular attenuation for dielectrics]
+
+This should give us something that looks more like glass:
+
+ ![Figure [black-dielectric-good]: Black dielectric with Fresnel reflectance](../images/img-39-black-dielectric-good.png)
+
+Try out different colors and see how that changes the overall appearance. The color shift from base color to white makes
+the sphere really feel like glass. This effect isn't limited to only transparent dielectrics -- we are going to apply the same
+principle to opaque materials in the next section.
 
 [^ch9-footnote16]: Augustin-Jean Fresnel was an early-19th-century physicist. His work on diffraction and polarization
 reinforced the theory that light behaves like a wave. He also invented the "Fresnel Lens" -- a type of lighthouse reflector
@@ -6544,6 +6627,8 @@ made of concentric prisms that combine reflection and refraction to focus the be
 
 [^ch9-footnote20]: See [Physically Based Rendering: From Theory To Implementation, 4th Edition, 9.5 "Dielectric BSDF"](https://pbr-book.org/4ed/Reflection_Models/Dielectric_BSDF)
 
+[^ch9-footnote21]: See the discussion of "color shift" in [#CookTorrance1982]. Note that the Fresnel equations are parameterized by wavelength -- the (complex) index of refraction depends on wavelength -- so the reflectance curve varies across the spectrum of colors. Cook and Torrance observe that $F_{90}$ matches the color of the light source at every wavelength (for metals as well as dielectrics).
+
 <!--
 -->
 
@@ -6552,31 +6637,31 @@ made of concentric prisms that combine reflection and refraction to focus the be
 References
 ==========
 
-[#Marsaglia03]: George Marsaglia, [*Xorshift RNGs*](https://www.jstatsoft.org/article/download/v008i14/916), 2003
+[#AlanWolfe2024]: Alan Wolfe [*Beyond White Noise for Real-Time Rendering*](https://youtu.be/tethAU66xaA?si=qIPEwF5XTm8kO3tF)
 
-[#Jenkins13]: Bob Jenkins, [*A hash function for hash Table lookup*](https://www.burtleburtle.net/bob/hash/doobs.html), 2013
+[#CookTorrance1982]: Robert L. Cook, Kenneth E. Torrance, *A Reflectance Model for Computer Graphics*, 1982
 
 [#Hughes13]: J.F. Hughes, A. van Dam, M. McGuire, D.F. Sklar, J.D. Foley, S.K. Feiner, K. Akeley *Computer Graphics: Principles and Practice, 3rd Edition, Section 1.6*
 
-[#AlanWolfe2024]: Alan Wolfe [*Beyond White Noise for Real-Time Rendering*](https://youtu.be/tethAU66xaA?si=qIPEwF5XTm8kO3tF)
-
 [#Immel86]: David S. Immel, Michael F. Cohen, Donald P. Greenberg *A Radiosity Method For Non-Diffuse Environments*
+
+[#Jenkins13]: Bob Jenkins, [*A hash function for hash Table lookup*](https://www.burtleburtle.net/bob/hash/doobs.html), 2013
 
 [#Kajiya86]: James T. Kajiya *The Rendering Equation*, 1986
 
 [#Lambert1760]: Johann Heinrich Lambert, *Photometria sive de mensura et gradibus luminis, colorum et umbrae*, 1760. Courtesy of ETH-Bibliothek Zürich, Switzerland.
 
-[#McGuire2024GraphicsCodex]: Morgan McGuire, *The Graphics Codex*, 2024
+[#Marsaglia03]: George Marsaglia, [*Xorshift RNGs*](https://www.jstatsoft.org/article/download/v008i14/916), 2003
 
-[#Saikia]: Sakib Saikia [*Deriving Lambertian BRDF from first principles*](https://sakibsaikia.github.io/graphics/2019/09/10/Deriving-Lambertian-BRDF-From-First-Principles.html)
+[#McGuire2024GraphicsCodex]: Morgan McGuire, *The Graphics Codex*, 2024
 
 [#Pharr2023]: Matt Pharr, Wenzel Jakob, and Greg Humphreys, *Physically Based Rendering: From Theory To Implementation, 4th Edition*
 
-[#Shirley2019]: Peter Shirley et al, [*Sampling Transformations Zoo*](https://research.nvidia.com/labs/rtr/publication/shirley2019sampling/)
-
-[#CookTorrance1982]: Robert L. Cook, Kenneth E. Torrance, *A Reflectance Model for Computer Graphics*, 1982
+[#Saikia]: Sakib Saikia [*Deriving Lambertian BRDF from first principles*](https://sakibsaikia.github.io/graphics/2019/09/10/Deriving-Lambertian-BRDF-From-First-Principles.html)
 
 [#Schlick1994]: Christophe Schlick, *An Inexpensive BRDF Model for Physically-based Rendering*, 1994
+
+[#Shirley2019]: Peter Shirley et al, [*Sampling Transformations Zoo*](https://research.nvidia.com/labs/rtr/publication/shirley2019sampling/)
 
 [^ericson]: C. Ericson, Real Time Collision Detection
 

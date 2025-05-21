@@ -170,9 +170,13 @@ fn scatter(input_ray: Ray, hit: Intersection, material: Material) -> Scatter {
 
   // Determine whether to use specular reflection.
   var is_specular: bool;
+  var attenuation = material.color;
   if is_transmissive {
       let cannot_refract = ref_ratio * ref_ratio * (1.0 - cos_theta * cos_theta) > 1.;
       is_specular = cannot_refract || schlick_fresnel(ref_ratio, cos_theta) > rand_f32();
+      if is_specular {
+        attenuation = vec3(1.);
+      }
   } else {
       is_specular = material.specular_or_ior > 0.;
   }
@@ -186,7 +190,6 @@ fn scatter(input_ray: Ray, hit: Intersection, material: Material) -> Scatter {
     scattered = sample_lambertian(N);
   }
   let output_ray = Ray(point_on_ray(input_ray, hit.t), scattered);
-  let attenuation = material.color;
   return Scatter(attenuation, output_ray);
 }
 
