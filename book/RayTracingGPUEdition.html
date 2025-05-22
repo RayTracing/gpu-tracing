@@ -5676,7 +5676,7 @@ $$
 The integral simply reduces to $\pi$[^ch9-footnote4] which leads to $albedo = \pi ~ color$. The
 Lambertian BRDF is typically defined as $\frac{color}{\pi}$ in order to make albedo equal to the
 material color. This is somewhat a matter of choice but we're going to stick with this definition
-in the rest of this book, such that the Lambertian attenuation for any two given light direction
+in the rest of this book, such that the Lambertian attenuation for any two given light directions
 becomes
 
 $$
@@ -5727,7 +5727,7 @@ $$
 This perfectly matches the Lambertian BRDF. Since the factors all cancel out, we can use _color_
 as the attenuation and the distribution inherently weighs the samples proportionally. There are a
 couple ways to sample a cosine-weighted hemisphere. One approach is to uniformly sample a 2D disk
-on the $xz$-plane and project the sampled point "up" to a hemisphere aligned with the $y-axis$.
+on the $xz$-plane and project the sampled point "up" to a hemisphere aligned with the $y$-axis.
 This produces a sampling direction in the "tangent space" of our surface patch which we'll have to
 rotate in a way that aligns the $y$-axis with the surface normal in the scene coordinate space.
 
@@ -5735,7 +5735,7 @@ Another approach is to uniformly sample a sphere that sits tangent to the surfac
 a cosine-weighted distribution when you project the point to the tangent hemisphere. This is also
 relatively simple to implement: sample the unit sphere to obtain a unit vector and add it to the
 surface normal. The resulting vector is our sampling direction. Let's implement this approach
-since a little simpler.
+since it's simpler.
 
 ![Figure [cosine-weighted-hemisphere-samples]: The yellow points were uniformly sampled on a sphere. The blue points result from projecting to the yellow points to a hemisphere aligned with the sphere](../images/fig-19-tangent-sphere.svg)
 
