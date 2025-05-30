@@ -6499,10 +6499,10 @@ With that, let's reorganize the code to make the flow control more clear. We'll 
       // Determine whether to use specular reflection.
       var is_specular: bool;
       if is_transmissive {
-          let cannot_refract = ref_ratio * ref_ratio * (1.0 - cos_theta * cos_theta) > 1.;
-          is_specular = cannot_refract || schlick_fresnel(ref_ratio, cos_theta) > rand_f32();
+        let cannot_refract = ref_ratio * ref_ratio * (1.0 - cos_theta * cos_theta) > 1.;
+        is_specular = cannot_refract || schlick_fresnel(ref_ratio, cos_theta) > rand_f32();
       } else {
-          is_specular = material.specular_or_ior > 0.;
+        is_specular = material.specular_or_ior > 0.;
       }
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
 
@@ -6535,7 +6535,8 @@ Here is another look from a different angle. Notice that the reflection of the s
 
 ### Dielectric Material Color
 
-Let's say we want to add a color tint to the glass sphere. Let's set the material color to black:
+Let's say we want to add a color tint to the glass sphere. Let's set the material color to black, which means the
+material should fully attenuate all incoming light:
 
 <script type="preformatted">
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
@@ -6561,7 +6562,8 @@ That doesn't look like glass as it is missing the sheen that's characteristic of
 defined as black, the dielectric material should appear somewhat reflective. Remember that we are currently using the
 material color directly as the attenuation factor but ideally the attenuation should match the reflectance given by
 the Fresnel equations. Given that $F_{90}$ is $1$, we should see a mirror reflection of all color channels without
-attenuation at grazing angles, and see more of the color of the material at $F_0$.[^ch9-footnote21]
+attenuation at grazing angles, and see more of the color of the material at $F_0$.[^ch9-footnote21] In other words,
+the transmitted portion of the incident light should get fully attenuated but not the reflected portion.
 
 Let's special case the Fresnel reflection and set the attenuation to $1$. Since our sampling probability matches the
 Fresnel reflectance, the attenuation will interpolate between the base color and $1$ based on the viewing angle:
@@ -6576,15 +6578,15 @@ Fresnel reflectance, the attenuation will interpolate between the base color and
       var attenuation = material.color;
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
       if is_transmissive {
-          let cannot_refract = ref_ratio * ref_ratio * (1.0 - cos_theta * cos_theta) > 1.;
-          is_specular = cannot_refract || schlick_fresnel(ref_ratio, cos_theta) > rand_f32();
+        let cannot_refract = ref_ratio * ref_ratio * (1.0 - cos_theta * cos_theta) > 1.;
+        is_specular = cannot_refract || schlick_fresnel(ref_ratio, cos_theta) > rand_f32();
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
-          if is_specular {
-            attenuation = vec3(1.);
-          }
+        if is_specular {
+          attenuation = vec3(1.);
+        }
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
       } else {
-          is_specular = material.specular_or_ior > 0.;
+        is_specular = material.specular_or_ior > 0.;
       }
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
 
@@ -6611,8 +6613,8 @@ This should give us something that looks more like glass:
  ![Figure [black-dielectric-good]: Black dielectric with Fresnel reflectance](../images/img-39-black-dielectric-good.png)
 
 Try out different colors and see how that changes the overall appearance. The color shift from base color to white makes
-the sphere really feel like glass. This effect isn't limited to only transparent dielectrics -- we are going to apply the same
-principle to opaque materials in the next section.
+the sphere really feel like glass. This serves to show that Fresnel reflectance matters for opaque materials too.
+
 
 [^ch9-footnote16]: Augustin-Jean Fresnel was an early-19th-century physicist. His work on diffraction and polarization
 reinforced the theory that light behaves like a wave. He also invented the "Fresnel Lens" -- a type of lighthouse reflector
@@ -6627,6 +6629,676 @@ made of concentric prisms that combine reflection and refraction to focus the be
 [^ch9-footnote20]: See [Physically Based Rendering: From Theory To Implementation, 4th Edition, 9.5 "Dielectric BSDF"](https://pbr-book.org/4ed/Reflection_Models/Dielectric_BSDF)
 
 [^ch9-footnote21]: See the discussion of "color shift" in [#CookTorrance1982]. Note that the Fresnel equations are parameterized by wavelength -- the (complex) index of refraction depends on wavelength -- so the reflectance curve varies across the spectrum of colors. Cook and Torrance observe that $F_{90}$ matches the color of the light source at every wavelength (for metals as well as dielectrics).
+
+
+Mixed BRDF
+----------
+Our material options for opaque surfaces are currently limited to perfectly diffuse and perfectly specular. Most
+common objects are actually somewhere in between. Think about ceramic, smooth plastic, polished hardwood flooring, car
+paint, etc. These materials are not perfect mirrors but appear shiny. A common way to achieve this appearance is to
+mix diffuse and specular reflectance by some proportion.
+
+### Combining Specular and Diffuse
+
+Non-negative values of `specular_or_ior` currently represent a binary choice between perfectly diffuse and perfectly
+specular. Let's change it to represent the proportion of specular reflectance, such that $0$ means
+diffuse, $1$ means specular, and values in between are a blend between the two. We can employ the same trick
+that we used to blend between specular reflection and specular transmission for the dielectric material, i.e. use the
+"specularness" value as a probability to sample one or the other:
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    ...
+    fn scatter(input_ray: Ray, hit: Intersection, material: Material) -> Scatter {
+      ...
+      // Determine whether to use specular reflection.
+      var is_specular: bool;
+      var attenuation = material.color;
+      if is_transmissive {
+        let cannot_refract = ref_ratio * ref_ratio * (1.0 - cos_theta * cos_theta) > 1.;
+        is_specular = cannot_refract || schlick_fresnel(ref_ratio, cos_theta) > rand_f32();
+        if is_specular {
+          attenuation = vec3(1.);
+        }
+      } else {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+        is_specular = material.specular_or_ior > rand_f32();
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+      }
+
+      var scattered: vec3f;
+      if is_specular {
+        scattered = reflect(incident, N);
+      } else if is_transmissive {
+        scattered = refract(incident, N, ref_ratio);
+      } else {
+        scattered = sample_lambertian(N);
+      }
+      let output_ray = Ray(point_on_ray(input_ray, hit.t), scattered);
+      let attenuation = material.color;
+      return Scatter(attenuation, output_ray);
+    }
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [specularness]: <kbd>[shaders.wgsl]</kbd> Mixing diffuse and specular reflection]
+
+Let's add some new spheres with a range of specular values. We'll also update the initial camera parameters to place
+the new spheres into view:
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+    const OBJECT_COUNT: u32 = 7;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    alias Scene = array<Sphere, OBJECT_COUNT>;
+    alias Materials = array<Material, OBJECT_COUNT>;
+
+    var<private> materials: Materials = Materials(
+      Material(/*color*/ vec3(0.7, 0.5, 0.5), /*specular_or_ior*/1.),
+      Material(/*color*/ vec3(0.5, 0.5, 0.9), /*specular_or_ior*/0.),
+      Material(/*color*/ vec3(0.7, 0.9, 0.2), /*specular_or_ior*/0.),
+      Material(/*color*/ vec3(1.), /*specular_or_ior*/-1.5),
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+
+      Material(/*color*/ vec3(1., 0.5, 0.), /*specular_or_ior*/0.9),
+      Material(/*color*/ vec3(1., 0.5, 0.), /*specular_or_ior*/0.5),
+      Material(/*color*/ vec3(1., 0.5, 0.), /*specular_or_ior*/0.1),
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    );
+
+    var<private> scene: Scene = Scene(
+      Sphere(/*center*/ vec3(-1.1, 0.5, 0.), /*radius*/ 0.5, /*material_index*/ 0),
+      Sphere(/*center*/ vec3(0., 0.5, 0.),   /*radius*/ 0.5, /*material_index*/ 1),
+      Sphere(/*center*/ vec3(1.1, 0.5, 0.),  /*radius*/ 0.5, /*material_index*/ 3),
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+
+      Sphere(/*center*/ vec3(-1.1, 0.5, -1.), /*radius*/ 0.5, /*material_index*/ 4),
+      Sphere(/*center*/ vec3(0., 0.5, -1.),   /*radius*/ 0.5, /*material_index*/ 5),
+      Sphere(/*center*/ vec3(1.1, 0.5, -1.),  /*radius*/ 0.5, /*material_index*/ 6),
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+
+      // Ground
+      Sphere(/*center*/ vec3(0., -2e2 - EPSILON, 0.), /*radius*/ 2e2, /*material_index*/ 2),
+    );
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [new-mixed-brdf-spheres]: <kbd>[shaders.wgsl]</kbd> New spheres with mixed opaque materials]
+</script>
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+    async fn main() -> Result<()> {
+        ...
+        let (device, queue, surface) = connect_to_gpu(&window).await?;
+        let mut renderer = render::PathTracer::new(device, queue, WIDTH, HEIGHT);
+        let mut camera = Camera::look_at(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+            Vec3::new(0., 0.724, 0.472),
+            Vec3::new(0., 0.5, -1.),
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+            Vec3::new(0., 1., 0.),
+        );
+        ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [reposition-camera-for-mixed-materials]: <kbd>[main.rs]</kbd>]
+</script>
+
+ ![Figure [mixed-specular-blend]: Blending diffuse and specular](../images/img-40-mixed-specular-blend.png)
+
+This behaves exactly the way I would expect. It gets us part of the way there, though something important is missing:
+Fresnel reflectance. The materials that I listed earlier (such as ceramic and plastic) are dielectrics. The material
+would look more natural if reflectance varied with the viewing angle and exhibited a color shift (like the black
+dielectric from the end of the previous section). I took some pictures from around my house to demonstrate what this
+looks like on some real-world objects:
+
+ ![Reflection of the paper towel roll is barely visible at normal incidence](../images/img-41-paper-towel-diffuse.png) ![Reflection more visible at 45 degrees](../images/img-42-paper-towel-inbetween.png) ![Reflection clearly visible at a grazing angle](../images/img-43-paper-towel-specular.png)
+
+ ![Car door at normal incidence appearing red](../images/img-44-car-door-normal.png height=350px) ![Same car door at grazing angle showing barely any color tint](../images/img-45-car-door-grazing.png height=350px)
+
+A common approach is to treat the surface as having an extremely thin transparent dielectric layer over a
+diffuse one. The portion of light that isn't directly reflected by the outer layer gets transmitted to and reflected by
+the diffuse layer. We'll pretend the dielectric layer is so thin that refraction is negligible.[^ch9-footnote22]
+
+To compute the Fresnel reflectance we need an index of refraction but our `Material` type only defines IOR for transparent
+surfaces. For now, let's hardcode 1.5 (the IOR of glass) and see how that looks:
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    ...
+    fn scatter(input_ray: Ray, hit: Intersection, material: Material) -> Scatter {
+      ...
+      // Determine whether to use specular reflection.
+      var is_specular: bool;
+      var attenuation = material.color;
+      if is_transmissive {
+        let cannot_refract = ref_ratio * ref_ratio * (1.0 - cos_theta * cos_theta) > 1.;
+        is_specular = cannot_refract || schlick_fresnel(ref_ratio, cos_theta) > rand_f32();
+        if is_specular {
+          attenuation = vec3(1.);
+        }
+      } else {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+        is_specular = schlick_fresnel(1. / 1.5, cos_theta) > rand_f32();
+        if is_specular {
+          attenuation = vec3(1.);
+        }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+      }
+      ...
+    }
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [glass-ior-for-specular-pdf]: <kbd>[shaders.wgsl]</kbd> Using glass IOR for specular Fresnel term]
+
+
+ ![Figure [mixed-brdf-with-glass-ior]: Mixed BRDF with glass IOR](../images/img-46-mixed-brdf-with-glass-ior.png)
+
+That looks better. Note that we are using the IOR to only determine the reflectance at normal incidence
+(i.e. $F_0 = \left(\frac{\eta - 1}{\eta + 1}\right)^2$) since it's not necessary to compute a refracted ray. Let's
+try assigning $F_0$ directly from `specular_or_ior`. We'll also refactor `schlick_fresnel` to accept $F_0$ as a
+parameter:
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+    fn schlick_f0_from_ior(ior: f32) -> f32 {
+      let sqrt_f0 = (ior - 1.) / (ior + 1.);
+      return sqrt_f0 * sqrt_f0;
+    }
+
+    fn schlick_fresnel(f0: f32, cos_theta: f32) -> f32 {
+      let u = 1 - cos_theta;
+      return mix(f0, 1., u * u * u * u * u);
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+
+    fn scatter(input_ray: Ray, hit: Intersection, material: Material) -> Scatter {
+      ...
+      // Determine whether to use specular reflection.
+      var is_specular: bool;
+      var attenuation = material.color;
+      if is_transmissive {
+        let cannot_refract = ref_ratio * ref_ratio * (1.0 - cos_theta * cos_theta) > 1.;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+        let f0 = schlick_f0_from_ior(ref_ratio);
+        is_specular = cannot_refract || schlick_fresnel(f0, cos_theta) > rand_f32();
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+        if is_specular {
+          attenuation = vec3(1.);
+        }
+      } else {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+        let f0 = material.specular_or_ior;
+        is_specular = schlick_fresnel(f0, cos_theta) > rand_f32();
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+        if is_specular {
+          attenuation = vec3(1.);
+        }
+      }
+      ...
+    }
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [specify-f0-directly]: <kbd>[shaders.wgsl]</kbd> Specifying $F_0$ directly]
+
+ ![Figure [specify-f0-directly-img]: Specifying $F_0$ directly](../images/img-47-specify-f0-directly.png)
+
+### Metalness
+
+We're getting closer but there are some issues. First, when $F_0$ is $0$ the surface still appears glossy due to
+Fresnel reflectance even though we want a $0$ valued `specular_or_ior` to represent a perfectly diffuse surface. That's
+easy enough to fix: let's make $0$ a special case in which reflections are always Lambertian:
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    ...
+    fn schlick_f0_from_ior(ior: f32) -> f32 {
+      let sqrt_f0 = (ior - 1.) / (ior + 1.);
+      return sqrt_f0 * sqrt_f0;
+    }
+
+    fn schlick_fresnel(f0: f32, cos_theta: f32) -> f32 {
+      let u = 1 - cos_theta;
+      return mix(f0, 1., u * u * u * u * u);
+    }
+
+    fn scatter(input_ray: Ray, hit: Intersection, material: Material) -> Scatter {
+      ...
+      // Determine whether to use specular reflection.
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+      var is_specular = false;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+      var attenuation = material.color;
+      if is_transmissive {
+        let cannot_refract = ref_ratio * ref_ratio * (1.0 - cos_theta * cos_theta) > 1.;
+        let f0 = schlick_f0_from_ior(ref_ratio);
+        is_specular = cannot_refract || schlick_fresnel(f0, cos_theta) > rand_f32();
+        if is_specular {
+          attenuation = vec3(1.);
+        }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+      } else if material.specular_or_ior > 0. {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+        let f0 = material.specular_or_ior;
+        is_specular = schlick_fresnel(f0, cos_theta) > rand_f32();
+        if is_specular {
+          attenuation = vec3(1.);
+        }
+      }
+      ...
+    }
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [special-case-lambertian]: <kbd>[shaders.wgsl]</kbd> Disable Fresnel reflectance for a Lambertian surface]
+
+
+That should remove the specular reflections from the ground and the blue diffuse sphere. The remaining issue is that the
+material loses its color as it gets more specular. Reflections without a color tint are correct for dielectrics but not
+for metals. Metallic surfaces can impart a color on reflections even at normal incidence. We need a way to
+incorporate the material color into $F_0$ when we want the surface to appear metallic _and also_ factor that into the
+final attenuation.
+
+Remember that the Fresnel reflectance $F$ -- i.e. the value returned by `schlick_fresnel` -- _is_ the correct
+specular attenuation value. We have so far simply assigned `vec3(1.)` because the sampling PDF is equal to $F$ and
+the terms cancel out when we apply the Monte Carlo formula. Since we're computing a blend between specular and diffuse,
+the value of the diffuse reflectance is $color * (1 - F)$. The diffuse probability (i.e. the probability of _not_
+choosing specular) is $1 - F$, so the diffuse terms cancel out too, allowing us to assign `material.color` directly to
+`attenuation`.
+
+Let's verify this by choosing between specular and diffuse with equal probability and let's compute the reflectance
+values explicitly without canceling out the terms. This will result in a noisier image that takes longer to resolve,
+particularly when `specular_or_ior` is closer to the extremes (since the PDF no longer matches the BRDF). However,
+the final output should look the same:
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    ...
+    fn schlick_f0_from_ior(ior: f32) -> f32 {
+      let sqrt_f0 = (ior - 1.) / (ior + 1.);
+      return sqrt_f0 * sqrt_f0;
+    }
+
+    fn schlick_fresnel(f0: f32, cos_theta: f32) -> f32 {
+      let u = 1 - cos_theta;
+      return mix(f0, 1., u * u * u * u * u);
+    }
+
+    fn scatter(input_ray: Ray, hit: Intersection, material: Material) -> Scatter {
+      ...
+      // Determine whether to use specular reflection.
+      var is_specular = false;
+      var attenuation = material.color;
+      if is_transmissive {
+        let cannot_refract = ref_ratio * ref_ratio * (1.0 - cos_theta * cos_theta) > 1.;
+        let f0 = schlick_f0_from_ior(ref_ratio);
+        is_specular = cannot_refract || schlick_fresnel(f0, cos_theta) > rand_f32();
+        if is_specular {
+          attenuation = vec3(1.);
+        }
+      } else if material.specular_or_ior > 0. {
+        let f0 = material.specular_or_ior;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+        let F = schlick_fresnel(f0, cos_theta);
+        is_specular = 0.5 > rand_f32();
+        if is_specular {
+          attenuation = vec3(F) / 0.5;
+        } else {
+          attenuation = material.color * vec3(1. - F) / 0.5;
+        }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+      }
+      ...
+    }
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [sampling-specular-with-equal-probability]: <kbd>[shaders.wgsl]</kbd> Sampling specular and diffuse with equal probability]
+
+Having removed the implicit cancelations, we can compute the specular attenuation by incorporating the material color
+into the Fresnel factor. `schlick_fresnel` is defined in terms of a scalar, so let's add a vectorized version in order
+to pass in the material color as $F_0$:
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    ...
+    fn schlick_f0_from_ior(ior: f32) -> f32 {
+      let sqrt_f0 = (ior - 1.) / (ior + 1.);
+      return sqrt_f0 * sqrt_f0;
+    }
+
+    fn schlick_fresnel(f0: f32, cos_theta: f32) -> f32 {
+      let u = 1 - cos_theta;
+      return mix(f0, 1., u * u * u * u * u);
+    }
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+
+    fn schlick_fresnel_vec3(f0: vec3f, cos_theta: f32) -> vec3f {
+      let u = 1 - cos_theta;
+      return mix(f0, vec3(1.), u * u * u * u * u);
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+
+    fn scatter(input_ray: Ray, hit: Intersection, material: Material) -> Scatter {
+      ...
+      // Determine whether to use specular reflection.
+      var is_specular = false;
+      var attenuation = material.color;
+      if is_transmissive {
+        let cannot_refract = ref_ratio * ref_ratio * (1.0 - cos_theta * cos_theta) > 1.;
+        let f0 = schlick_f0_from_ior(ref_ratio);
+        is_specular = cannot_refract || schlick_fresnel(f0, cos_theta) > rand_f32();
+        if is_specular {
+          attenuation = vec3(1.);
+        }
+      } else if material.specular_or_ior > 0. {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+        let f0 = material.color;
+        let F = schlick_fresnel_vec3(f0, cos_theta);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+        is_specular = 0.5 > rand_f32();
+        if is_specular {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+          attenuation = F / 0.5;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+        } else {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+          attenuation = material.color * (1. - F) / 0.5;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+        }
+      }
+      ...
+    }
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [metallic-f0]: <kbd>[shaders.wgsl]</kbd> Metallic $F_0$]
+
+ ![Figure [metallic-f0-img]: Metallic $F_0$](../images/img-48-metallic-f0.png)
+
+Now we have a way to create a metallic appearance that exhibits the Fresnel color shift at grazing angles. To make
+the material look like a dielectric, we want $F_0$ to be the same across all color channels and be consistent with a
+realistic IOR.
+
+Let's re-incorporate `specular_or_ior` into how we determine $F_0$. We know how to define a metallic $F_0$ (the
+material color) and a dielectric $F_0$. Let's interpolate between the two using `specular_or_ior` such that $0$ means
+dielectric and $1$ means metallic. You can choose any value that you like for dielectric $F_0$, though for now let's go
+with the one for glass ($\eta = \frac{1}{1.5}$, $F_0 = 0.04$):
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    ...
+    const MAX_PATH_LENGTH: u32 = 13u;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+    const GLASS_F0: f32 = 0.04;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    ...
+    fn scatter(input_ray: Ray, hit: Intersection, material: Material) -> Scatter {
+      ...
+      // Determine whether to use specular reflection.
+      var is_specular = false;
+      var attenuation = material.color;
+      if is_transmissive {
+        let cannot_refract = ref_ratio * ref_ratio * (1.0 - cos_theta * cos_theta) > 1.;
+        let f0 = schlick_f0_from_ior(ref_ratio);
+        is_specular = cannot_refract || schlick_fresnel(f0, cos_theta) > rand_f32();
+        if is_specular {
+          attenuation = vec3(1.);
+        }
+      } else if material.specular_or_ior > 0. {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+        let metallic = material.specular_or_ior;
+        let f0 = mix(vec3(GLASS_F0), material.color, metallic);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+        let F = schlick_fresnel_vec3(f0, cos_theta);
+        is_specular = 0.5 > rand_f32();
+        if is_specular {
+          attenuation = F / 0.5;
+        } else {
+          attenuation = material.color * (1. - F) / 0.5;
+        }
+      }
+      ...
+    }
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [metalness]: <kbd>[shaders.wgsl]</kbd> Interpolating between metallic and dielectric $F_0$]
+
+ ![Figure [metalness-img]: Interpolating between metallic and dielectric $F_0$](../images/img-49-interpolate-metallic-and-dielectric-f0.png)
+
+There is one final adjustment to make. You may have noticed that the color of the "more metallic" spheres look brighter
+and don't quite match the tone of the material color. In the dielectric case the color comes only from diffuse
+reflection. In the metallic case both diffuse and specular reflections contribute in a way that blends
+incorrectly. We want the specular reflection to dominate when the material is metallic with no diffuse reflection, so it
+makes sense to attenuate diffuse reflectance for metals. Let's make diffuse reflectance decrease linearly
+with "metalness" and drop to $0$ when the material is "maximally metallic" (i.e. `specular_or_ior` is $1$):
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    ...
+    fn scatter(input_ray: Ray, hit: Intersection, material: Material) -> Scatter {
+      ...
+      // Determine whether to use specular reflection.
+      var is_specular = false;
+      var attenuation = material.color;
+      if is_transmissive {
+        let cannot_refract = ref_ratio * ref_ratio * (1.0 - cos_theta * cos_theta) > 1.;
+        let f0 = schlick_f0_from_ior(ref_ratio);
+        is_specular = cannot_refract || schlick_fresnel(f0, cos_theta) > rand_f32();
+        if is_specular {
+          attenuation = vec3(1.);
+        }
+      } else if material.specular_or_ior > 0. {
+        let metallic = material.specular_or_ior;
+        let f0 = mix(vec3(GLASS_F0), material.color, metallic);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+        let diffuse_color = material.color * (1. - metallic);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+        let F = schlick_fresnel_vec3(f0, cos_theta);
+        is_specular = 0.5 > rand_f32();
+        if is_specular {
+          attenuation = F / 0.5;
+        } else {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+          attenuation = diffuse_color * (1. - F) / 0.5;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+        }
+      }
+      ...
+    }
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [metalness-with-diffuse-reflectance]: <kbd>[shaders.wgsl]</kbd> Scaling diffuse reflectance for metals]
+
+ ![Figure [metalness-with-diffuse-reflectance-img]: The sphere on the right (metallic = 0.1) gets almost all of its yellow color from diffuse scattering while specular reflection is untinted. The sphere on the left (metallic = 0.9) gets nearly all of its color from specular reflection and diffuse bounces contribute little to outgoing radiance.](../images/img-50-adjust-diffuse-reflectance-for-metals.png)
+
+We now a have a good way to control how metallic a surface appears by effectively reducing the influence of diffuse
+scattering. Specifying "metallicness" in this way is common practice for PBR (i.e. physically-based) materials and
+supported by popular rendering tools like Unity, Unreal, and Blender. You could provide even more control and turn the
+specular $F_{90}$ and `GLASS_F0` into configurable `Material` parameters as well.
+
+Given its new meaning, it makes sense to rename `specular_or_ior` to `metallic_or_ior`:
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    ...
+    fn scatter(input_ray: Ray, hit: Intersection, material: Material) -> Scatter {
+      ...
+      // `ior` and `ref_ratio` only have meaning if the material is transmissive.
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+      let is_transmissive = material.metallic_or_ior < 0.;
+      let ior = abs(material.metallic_or_ior);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+      let ref_ratio = select(ior, 1. / ior, is_front_face);
+
+      // Determine whether to use specular reflection.
+      var is_specular = false;
+      var attenuation = material.color;
+      if is_transmissive {
+        let cannot_refract = ref_ratio * ref_ratio * (1.0 - cos_theta * cos_theta) > 1.;
+        let f0 = schlick_f0_from_ior(ref_ratio);
+        is_specular = cannot_refract || schlick_fresnel(f0, cos_theta) > rand_f32();
+        if is_specular {
+          attenuation = vec3(1.);
+        }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+      } else if material.metallic_or_ior > 0. {
+        let metallic = material.metallic_or_ior;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+        let f0 = mix(vec3(GLASS_F0), material.color, metallic);
+        let diffuse_color = material.color * (1. - metallic);
+        let F = schlick_fresnel_vec3(f0, cos_theta);
+        is_specular = 0.5 > rand_f32();
+        if is_specular {
+          attenuation = F / 0.5;
+        } else {
+          attenuation = diffuse_color * (1. - F) / 0.5;
+        }
+      }
+      ...
+    }
+    ...
+    struct Material {
+      color: vec3f,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+      metallic_or_ior: f32,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    }
+
+    fn sky_color(ray: Ray) -> vec3f {
+      let t = 0.5 * (normalize(ray.direction).y + 1.);
+      return (1. - t) * vec3(1.) + t * vec3(0.3, 0.5, 1.);
+    }
+
+    const OBJECT_COUNT: u32 = 7;
+    alias Scene = array<Sphere, OBJECT_COUNT>;
+    alias Materials = array<Material, OBJECT_COUNT>;
+
+    var<private> materials: Materials = Materials(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+      Material(/*color*/ vec3(0.7, 0.5, 0.5), /*metallic_or_ior*/1.),
+      Material(/*color*/ vec3(0.5, 0.5, 0.9), /*metallic_or_ior*/0.),
+      Material(/*color*/ vec3(0.7, 0.9, 0.2), /*metallic_or_ior*/0.),
+      Material(/*color*/ vec3(1.), /*metallic_or_ior*/-1.5),
+
+      Material(/*color*/ vec3(1., 0.5, 0.), /*metallic_or_ior*/0.9),
+      Material(/*color*/ vec3(1., 0.5, 0.), /*metallic_or_ior*/0.5),
+      Material(/*color*/ vec3(1., 0.5, 0.), /*metallic_or_ior*/0.1),
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    );
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [rename-metallic-or-ior]: <kbd>[shaders.wgsl]</kbd>]
+
+
+### A Better Sampling PDF
+
+The code currently samples between specular and diffuse scattering with equal (50%) probability. This isn't efficient
+especially when one contributes a lot more to the final color than the other. When the material is perfectly metallic
+the diffuse reflectance gets scaled down to 0, so half of the sampled paths don't contribute any radiance while still
+influencing the accummulated average in the radiance texture. Similarly, a perflectly dielectric surface wastes many
+specular samples near normal incidence.
+
+The ideal PDF for a specular sample should exactly match the proportion of specular reflectance relative to the total
+reflectance. Normally this should be given by the Fresnel reflectance ($F$) but our choice for specular over diffuse
+needs to take into account the material's "metallicness" in addition to the Fresnel factor -- after all we always want
+a specular reflection if the surface is perfectly metallic even if $F_0$ is a small number.
+
+For any given sample the total reflectance is simply the sum of the specular and diffuse proportions. Given specular
+reflectance $S = F$ and diffuse reflectance $D = color * (1 - metallic) * (1 - F)$, this can be computed as:
+
+$$
+  \rho_{specular} = \frac{S}{S + D} = \frac{F}{F + color * (1 - metallic) * (1 - F)}
+$$
+
+$\rho_{specular}$ approaches $1$ as $D$ decreases, which can happen due to a dark material color, a high value
+of $metallic$, or a high $F$.
+
+We already compute $S$ and $D$ for the final `attenuation` value but we can't use these directly to compute the
+probability because they are RGB triplets. Unless we were to trace each color channel independently, we need a way to
+convert the 3-dimensional RGB value into a scalar.
+
+Fortunately there is a formula we can use. This formula converts a (linear) RGB value to a grayscale _luminance_
+(i.e. the perceptual brightness of the color) based on a linear combination of the individual primary colors:[^ch9-footnote23]
+
+$$
+  Y = 0.2126 * R + 0.7152 * G + 0.0722 * B
+$$
+
+The coefficients assigned to each color channel reflects the sensitivity of the human eye to that primary color based on
+careful measurements (green being the highest and blue the lowest). This gives us a meaasure of reflectance that is
+weighted for human perception. It doesn't mean that a blue surface (R=0, G=0, B=1) is less reflective but it does appear
+darker to us than a green surface when viewed from the same computer display.
+
+Let's put it to use. We'll introduce a new function called `luminance` and use it to compute the specular sampling PDF
+from the specular and diffuse attenuation factors:
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+    // Convert RGB to a grayscale luminance value
+    fn luminance(rgb: vec3f) -> f32 {
+      return dot(rgb, vec3(0.2126, 0.7152, 0.0722));
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    ...
+    fn scatter(input_ray: Ray, hit: Intersection, material: Material) -> Scatter {
+      ...
+      // `ior` and `ref_ratio` only have meaning if the material is transmissive.
+      let is_transmissive = material.metallic_or_ior < 0.;
+      let ior = abs(material.metallic_or_ior);
+      let ref_ratio = select(ior, 1. / ior, is_front_face);
+
+      // Determine whether to use specular reflection.
+      var is_specular = false;
+      var attenuation = material.color;
+      if is_transmissive {
+        let cannot_refract = ref_ratio * ref_ratio * (1.0 - cos_theta * cos_theta) > 1.;
+        let f0 = schlick_f0_from_ior(ref_ratio);
+        is_specular = cannot_refract || schlick_fresnel(f0, cos_theta) > rand_f32();
+        if is_specular {
+          attenuation = vec3(1.);
+        }
+      } else if material.metallic_or_ior > 0. {
+        let metallic = material.metallic_or_ior;
+        let f0 = mix(vec3(GLASS_F0), material.color, metallic);
+        let diffuse_color = material.color * (1. - metallic);
+
+        let F = schlick_fresnel_vec3(f0, cos_theta);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+        let specular = F;
+        let diffuse = diffuse_color * (1. - F);
+
+        let S = luminance(specular);
+        let D = luminance(diffuse);
+        let specular_pdf = S / (S + D);
+
+        is_specular = specular_pdf > rand_f32();
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+        if is_specular {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+          attenuation = specular / specular_pdf;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+        } else {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+          attenuation = diffuse / (1. - specular_pdf);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+        }
+      }
+      ...
+    }
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [fresnel-and-color-weighted-specular-pdf]: <kbd>[shaders.wgsl]</kbd> The new specular PDF]
+
+You should notice a difference in the amount of noise (especially when you move the camera). Here is a close-up of
+the before and after. Both screenshots were taken after running the program for about 5 seconds:
+
+  ![Before, with $\rho_{specular} = 0.5$](../images/img-52-metallic-noisy.png height=350px) ![After, with the weighted PDF](../images/img-51-metallic-not-noisy.png height=350px)
+
+
+[^ch9-footnote22]: You can implement a similar effect by placing a diffuse sphere inside a dielectric sphere. If the
+spheres are concentric then the thickness of the dielectric layer is equal to the difference of their radii.
+
+[^ch9-footnote23]: This normalized form of luminance (where $1$ is the "perfect white") is called _relative luminance_. This specific formula comes from ITU-R BT.709 standard used for color displays. The $Y$ refers to the first component in the $YC_BC_R$ color space which encodes video as the combination of "perceived brightness", "redness", and "blueness". This is closely related to the $YUV$ format used in analog television broadcast which is itself derived from the original CIE XYZ color space published in 1931. The history of color science and how color exchange formats evolved through the history of television and computer displays is quite fascinating.
 
 <!--
 -->
