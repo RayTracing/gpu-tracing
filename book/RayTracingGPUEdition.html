@@ -6290,7 +6290,7 @@ $\frac{\eta_{inside}}{\eta_{outside}}$, so we need to take the reciprocal of it 
 How we distinguish the "outside" of a shape from the "inside" is a matter of convention. Typically, the surface
 normals are defined as facing outward, so we can treat the side facing the normal direction as the "front" face.
 
- ![Figure [flipped-normal]: The outward face normal and the flipped normal used for shading when the ray intersects the surface from behind](../images/fig-17-front-facing-normal.svg)
+  ![Figure [flipped-normal]: The outward face normal and the flipped normal used for shading when the ray intersects the surface from behind](../images/fig-17-front-facing-normal.svg)
 
 The front face is easy enough to detect: if the dot product of the ray direction and the normal vector is negative, then
 the vectors "oppose" each other and the intersection is on the front face. It is also common practice to flip the normal
@@ -6343,12 +6343,12 @@ vector when the intersection is on the back face, so that material evaluation ha
 
 That was the last piece of the puzzle. This should produce the following image:
 
- ![Figure [working-specular-transmission]: Working specular transmission](../images/img-34-working-specular-transmission.png)
+  ![Figure [working-specular-transmission]: Working specular transmission](../images/img-34-working-specular-transmission.png)
 
 As a quick test, change the index of refraction assigned to the material from `1.5` to `1.0/1.5`. That should trigger
 the total internal reflection case but the black sphere inside should look different:
 
- ![Figure [working-specular-transmission-inverted-ior]: Working specular transmission with inverted IOR](../images/img-35-working-specular-transmission-inverted-ior.png)
+  ![Figure [working-specular-transmission-inverted-ior]: Working specular transmission with inverted IOR](../images/img-35-working-specular-transmission-inverted-ior.png)
 
 [^ch9-footnote8]: See [Physically Based Rendering: From Theory To Implementation, 4th Edition, 9.3.2 "Specular Reflection and Transmission: The Index of Refraction"](https://pbr-book.org/4ed/Reflection_Models/Specular_Reflection_and_Transmission#TheIndexofRefraction)
 
@@ -6527,11 +6527,11 @@ With that, let's reorganize the code to make the flow control more clear. We'll 
 Note that due to WGSL's short-circuiting rules, the call to `schlick_fresnel` won't evaluate if `cannot_refract`
 is true, skipping the computation at angles of total internal reflection.
 
- ![Figure [dielectric-bsdf]: Specular Dielectric BSDF](../images/img-36-dielectric-bsdf.png)
+  ![Figure [dielectric-bsdf]: Specular Dielectric BSDF](../images/img-36-dielectric-bsdf.png)
 
 Here is another look from a different angle. Notice that the reflection of the sky is more prominent on the fringes:
 
- ![Figure [dielectric-bsdf]: Specular Dielectric BSDF](../images/img-37-dielectric-bsdf-up-close.png)
+  ![Figure [dielectric-bsdf]: Specular Dielectric BSDF](../images/img-37-dielectric-bsdf-up-close.png)
 
 ### Dielectric Material Color
 
@@ -6556,7 +6556,7 @@ material should fully attenuate all incoming light:
 
 This will result in an image like this:
 
- ![Figure [black-dielectric-bad]: Black dielectric without Fresnel reflectance](../images/img-38-black-dielectric-bad.png)
+  ![Figure [black-dielectric-bad]: Black dielectric without Fresnel reflectance](../images/img-38-black-dielectric-bad.png)
 
 That doesn't look like glass as it is missing the sheen that's characteristic of dielectrics. Even if the base color is
 defined as black, the dielectric material should appear somewhat reflective. Remember that we are currently using the
@@ -6610,7 +6610,7 @@ Fresnel reflectance, the attenuation will interpolate between the base color and
 
 This should give us something that looks more like glass:
 
- ![Figure [black-dielectric-good]: Black dielectric with Fresnel reflectance](../images/img-39-black-dielectric-good.png)
+  ![Figure [black-dielectric-good]: Black dielectric with Fresnel reflectance](../images/img-39-black-dielectric-good.png)
 
 Try out different colors and see how that changes the overall appearance. The color shift from base color to white makes
 the sphere really feel like glass. This serves to show that Fresnel reflectance matters for opaque materials too.
@@ -6745,7 +6745,7 @@ the new spheres into view:
     [Listing [reposition-camera-for-mixed-materials]: <kbd>[main.rs]</kbd>]
 </script>
 
- ![Figure [mixed-specular-blend]: Blending diffuse and specular](../images/img-40-mixed-specular-blend.png)
+  ![Figure [mixed-specular-blend]: Blending diffuse and specular](../images/img-40-mixed-specular-blend.png)
 
 This behaves exactly the way I would expect. It gets us part of the way there, though something important is missing:
 Fresnel reflectance. The materials that I listed earlier (such as ceramic and plastic) are dielectrics. The material
@@ -6753,9 +6753,9 @@ would look more natural if reflectance varied with the viewing angle and exhibit
 dielectric from the end of the previous section). I took some pictures from around my house to demonstrate what this
 looks like on some real-world objects:
 
- ![Reflection of the paper towel roll is barely visible at normal incidence](../images/img-41-paper-towel-diffuse.png) ![Reflection more visible at 45 degrees](../images/img-42-paper-towel-inbetween.png) ![Reflection clearly visible at a grazing angle](../images/img-43-paper-towel-specular.png)
+  ![Reflection of the paper towel roll is barely visible at normal incidence](../images/img-41-paper-towel-diffuse.png) ![Reflection more visible at 45 degrees](../images/img-42-paper-towel-inbetween.png) ![Reflection clearly visible at a grazing angle](../images/img-43-paper-towel-specular.png)
 
- ![Car door at normal incidence appearing red](../images/img-44-car-door-normal.png height=350px) ![Same car door at grazing angle showing barely any color tint](../images/img-45-car-door-grazing.png height=350px)
+  ![Car door at normal incidence appearing red](../images/img-44-car-door-normal.png height=350px) ![Same car door at grazing angle showing barely any color tint](../images/img-45-car-door-grazing.png height=350px)
 
 A common approach is to treat the surface as having an extremely thin transparent dielectric layer over a
 diffuse one. The portion of light that isn't directly reflected by the outer layer gets transmitted to and reflected by
@@ -6793,7 +6793,7 @@ surfaces. For now, let's hardcode 1.5 (the IOR of glass) and see how that looks:
     [Listing [glass-ior-for-specular-pdf]: <kbd>[shaders.wgsl]</kbd> Using glass IOR for specular Fresnel term]
 
 
- ![Figure [mixed-brdf-with-glass-ior]: Mixed BRDF with glass IOR](../images/img-46-mixed-brdf-with-glass-ior.png)
+  ![Figure [mixed-brdf-with-glass-ior]: Mixed BRDF with glass IOR](../images/img-46-mixed-brdf-with-glass-ior.png)
 
 That looks better. Note that we are using the IOR to only determine the reflectance at normal incidence
 (i.e. $F_0 = \left(\frac{\eta - 1}{\eta + 1}\right)^2$) since it's not necessary to compute a refracted ray. Let's
@@ -6844,7 +6844,7 @@ parameter:
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     [Listing [specify-f0-directly]: <kbd>[shaders.wgsl]</kbd> Specifying $F_0$ directly]
 
- ![Figure [specify-f0-directly-img]: Specifying $F_0$ directly](../images/img-47-specify-f0-directly.png)
+  ![Figure [specify-f0-directly-img]: Specifying $F_0$ directly](../images/img-47-specify-f0-directly.png)
 
 ### Metalness
 
@@ -7014,7 +7014,7 @@ to pass in the material color as $F_0$:
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     [Listing [metallic-f0]: <kbd>[shaders.wgsl]</kbd> Metallic $F_0$]
 
- ![Figure [metallic-f0-img]: Metallic $F_0$](../images/img-48-metallic-f0.png)
+  ![Figure [metallic-f0-img]: Metallic $F_0$](../images/img-48-metallic-f0.png)
 
 Now we have a way to create a metallic appearance that exhibits the Fresnel color shift at grazing angles. To make
 the material look like a dielectric, we want $F_0$ to be the same across all color channels and be consistent with a
@@ -7063,7 +7063,7 @@ with the one for glass ($\eta = \frac{1}{1.5}$, $F_0 = 0.04$):
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     [Listing [metalness]: <kbd>[shaders.wgsl]</kbd> Interpolating between metallic and dielectric $F_0$]
 
- ![Figure [metalness-img]: Interpolating between metallic and dielectric $F_0$](../images/img-49-interpolate-metallic-and-dielectric-f0.png)
+  ![Figure [metalness-img]: Interpolating between metallic and dielectric $F_0$](../images/img-49-interpolate-metallic-and-dielectric-f0.png)
 
 There is one final adjustment to make. You may have noticed that the color of the "more metallic" spheres look brighter
 and don't quite match the tone of the material color. In the dielectric case the color comes only from diffuse
@@ -7109,7 +7109,7 @@ with "metalness" and drop to $0$ when the material is "maximally metallic" (i.e.
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     [Listing [metalness-with-diffuse-reflectance]: <kbd>[shaders.wgsl]</kbd> Scaling diffuse reflectance for metals]
 
- ![Figure [metalness-with-diffuse-reflectance-img]: The sphere on the right (metallic = 0.1) gets almost all of its yellow color from diffuse scattering while specular reflection is untinted. The sphere on the left (metallic = 0.9) gets nearly all of its color from specular reflection and diffuse bounces contribute little to outgoing radiance.](../images/img-50-adjust-diffuse-reflectance-for-metals.png)
+  ![Figure [metalness-with-diffuse-reflectance-img]: The sphere on the right (metallic = 0.1) gets almost all of its yellow color from diffuse scattering while specular reflection is untinted. The sphere on the left (metallic = 0.9) gets nearly all of its color from specular reflection and diffuse bounces contribute little to outgoing radiance.](../images/img-50-adjust-diffuse-reflectance-for-metals.png)
 
 We now a have a good way to control how metallic a surface appears by effectively reducing the influence of diffuse
 scattering. Specifying "metallicness" in this way is common practice for PBR (i.e. physically-based) materials and
@@ -7223,12 +7223,12 @@ $$
   Y = 0.2126 * R + 0.7152 * G + 0.0722 * B
 $$
 
-The coefficients assigned to each color channel reflects the sensitivity of the human eye to that primary color based on
-careful measurements (green being the highest and blue the lowest). This gives us a meaasure of reflectance that is
+The coefficient assigned to each color channel reflects the sensitivity of the human eye to that primary color based on
+careful measurements (green being the highest and blue the lowest), giving us a measure of reflectance that is
 weighted for human perception. It doesn't mean that a blue surface (R=0, G=0, B=1) is less reflective but it does appear
-darker to us than a green surface when viewed from the same computer display.
+darker to us than a green surface when viewed on the same computer display.
 
-Let's put it to use. We'll introduce a new function called `luminance` and use it to compute the specular sampling PDF
+We'll introduce a new function called `luminance` and use it to compute the specular sampling PDF
 from the specular and diffuse attenuation factors:
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
