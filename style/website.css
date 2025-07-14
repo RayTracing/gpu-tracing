@@ -65,3 +65,17 @@ div.books a {
 p {
     line-height: 140%;
 }
+
+#cover-img {
+    display: block;
+    margin: auto;
+    margin-top: 4em;
+    margin-bottom: 4em;
+    border: 10px solid #2c2c2c;
+    background-image: url('../images/cover.png');
+    background-size: 600px;
+}
+
+#cover-img:hover {
+    background-image: url('../images/cover-debug.png');
+}
