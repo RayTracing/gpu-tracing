@@ -5433,16 +5433,15 @@ interacts with a surface: some amount of the energy gets absorbed and the rest s
 represented in the return type (the `Scatter` struct) as an attenuation factor and a ray direction.
 
 The appearance of a real-world object depends on its material composition. This includes surface
-features--like the overall smoothness of the surface--and molecular properties like electrical
-conductivity and crystal structure. Generally we can get away with an approximate representation
-of what makes an object appear like a metal or glass, with parameters that an artist can tune
-to achieve a particular appearance.
+features like overall smoothness, as well as molecular properties like electrical conductivity and
+crystal structure. Renderers used in game and move production frequently rely on approximations with
+parameters that an artist can tune to achieve a particular appearance.
 
-We defined the first material parameter in Section [colored spheres]: color. We declared
-the material color as a field of the `Sphere` structure and used it to compute the attenuation
-factor in `scatter`. Let's introduce a new data structure `Material` and store the color there
-instead. We'll declare a separate array to store the `Material` instances and have each `Sphere`
-reference a material by its array index.
+We have already defined the first material parameter: _color_ (Section [colored spheres]). It is
+currently declared as a field of the `Sphere` data structure and used to compute the attenuation
+factor in `scatter`. Let's introduce a new data structure called `Material` and store the color
+there instead. We'll declare a separate array to store the `Material` instances and have each
+`Sphere` reference a material by its array index.
 
 <script type="preformatted">
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
@@ -5550,12 +5549,11 @@ Storing the material separately allows multiple `Sphere` instances to reference 
 This reduces the overall required memory when the number of spheres exceeds the available materials.
 Another advantage is that it reduces the size of an individual `Sphere` which is better for memory
 access performance. Note that the `scene` array gets accessed far more frequently during the search
-for an intersection while the `materials` array is only read from once an intersection has been
-found.
+for an intersection while the `materials` array is only read once an intersection is found.
 
-I also rearranged the scene to contain two spheres that use the same material, with a larger
-sphere acting as the ground and a small one touching the ground at the origin. Let's reposition
-the camera accordingly:
+Listing [materials-array] rearranges the scene to contain two spheres that use the same material,
+with a larger sphere acting as the ground and a small one touching the ground at the origin. Let's
+reposition the camera accordingly:
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
     ...
@@ -5590,10 +5588,10 @@ perfectly _specular_ (i.e. mirror-like) surface reflects incident light from a g
 always at the same angle, which means we can compute the next transport path segment directly
 by reflecting the `input_ray` around the normal.
 
-A specular surface appears "shiny" because the reflected radiance varies with the viewing
+A specular surface appears "shiny" because the reflected radiance varies sharply with the viewing
 direction. In contrast, a matte surface reflects incident light diffusely at many angles, such
 that the apparent brightness of the surface doesn't vary that much
-with the viewing direction. An so called "ideal" matte or _diffuse_ surface exhibits _Lambertian
+with the viewing direction. A so called "ideal" matte or _diffuse_ surface exhibits _Lambertian
 reflectance_ in which the reflected radiance is the same in all directions.
 
   ![Figure [lambertian-and-mirror-brdf-lobes]: The reflectance lobes for a perfectly specular (left) and a Lambertian diffuse (right) surface. A perfectly specular surface reflects the light beam from incident direction $\omega$ towards a single direction while a Lambertian diffuse surface reflects the beam equally in all directions. The same principle applies in reverse if we treat $\omega$ as the reflected/outgoing light direction.
@@ -5620,23 +5618,22 @@ over a volume through space rather than a dimensionless ray. Hence, when discuss
 light energy, the intersection is typically treated as a tiny surface patch with non-zero area
 rather than a dimensionless point.
 
-  ![Figure [brdf-hemisphere]: The integration interval $\Omega$ and the differential solid angle $d\omega$. Radiance is defined as radiant flux (or power) arriving at $X$ via $d\omega$. $d\omega$ can be thought of a very constrained subset of directions among infinitely many over a hemosphere.
+  ![Figure [brdf-hemisphere]: The integration interval $\Omega$ and the differential solid angle $d\omega$. Radiance is defined as radiant flux (or power) arriving at $X$ via $d\omega$. One can think of $d\omega$ as an infinitesimal subset of directions among infinitely many over a hemisphere.
    ](../images/fig-10-brdf-hemisphere.svg)
 
-A surface patch in 3D space has a different _apparent_ surface area when viewed from different
+A surface patch in 3D space has a different apparent surface area when viewed from different
 angles. The surface appears largest when the view direction is parallel to the surface normal. When
-the view direction is exactly tangent to the surface, the patch is no longer visible. Radiance is
-defined as _per unit surface area_ so as the projected area shrinks at grazing angles, the computed
-radiance has to increase if the solid angle and the incoming radiant power don't change. In order to keep
-radiance equal in all directions, the attenuation should scale proportionally to the apparent surface
-area, decreasing down to zero when the surface is viewed at a 90 degree angle.
+the view direction is exactly tangent to the surface, the patch is no longer visible. The radiance
+computed along the incident ray is relative to this apparent or _projected_ area. In order to keep
+the reflected radiance equal in all directions relative to the same unit area, it should scale
+proportionally to the projected area, decreasing down to zero when the surface is viewed at a 90
+degree angle.
 
-According to _Lambert's projected area law_, the apparent surface area scales proportionally to the
+Following _Lambert's projected area law_, the apparent surface area scales proportionally to the
 cosine of the angle between the surface normal and the viewing direction. For a sampled incident
 light direction $\omega$ (which is a unit vector) and surface normal $\vec{\textbf{N}}$ this is
 given by the absolute value of their dot product: $| \vec{\textbf{N}} \cdot \omega |$. We can
-simply multiply `material.color` by `dot(N, normalize(output_ray.direction))` and we'll have a
-Lambertian material.
+simply multiply `material.color` by this dot product and we'll have a Lambertian material.
 
 ![Figure [lambert-photometria]: When viewed at an angle, the area $AB$ gets projected onto $AE$, which is smaller. This drawing is from Figure 1 in Johann Heinrich Lambert's "Photometria" [#Lambert1760].
    ](../images/img-17-lambert-cosine-law-photometria.png)
@@ -5652,7 +5649,7 @@ $$
   \int_\Omega I(\omega) ~ | \vec{\mathbf{N}} \cdot \omega | ~ d\omega
 $$
 
-Suppose now that $\omega_o$ represents a reflected light direction (i.e. `input_ray`) and $\omega_i$
+Suppose now that $\omega_o$ represents a reflected light direction and $\omega_i$
 is a single direction from which light arrives at the surface. The reflected radiance $I(\omega_o)$
 is given by
 
@@ -5661,7 +5658,7 @@ $$
 $$
 
 $f$ is a function that returns the reflectance of the surface material for a pair of incident and
-reflected light direction. The reflectance function for a perfect mirror returns 0 unless the two
+reflected light directions. The reflectance function for a perfect mirror returns 0 unless the two
 directions are mirror reflections of each other. The function for a Lambertian surface returns a
 constant value regardless of the directions. This function is also called a BRDF (for
 _Bi-directional Reflectance Distribution Function_).
@@ -5686,16 +5683,15 @@ $$
 Except, we aren't computing the integral analytically but rather by random sampling using
 _Monte Carlo Integration_[^ch9-footnote5], so we also need to weigh each sample by its probability.
 Suppose we have some function $g(x)$ that we want to integrate over some domain $A$ by drawing $N$
-random samples from some probability distibution. The integral can be approximated as
+random samples from some probability distibution $\rho$. The integral can be approximated as
 
 $$
   \int_A g(x) ~ dx \approx \dfrac{1}{N}\sum_{\bar{\mathbf{x}}}^N \dfrac{g(\bar{\mathbf{x}})}{\rho(\bar{\mathbf{x}})}
 $$
 
-where $\rho(\bar{\mathbf{x}})$ is a probability distribution function (PDF) that was used to choose
-a random sample ($\bar{\mathbf{x}}$). When the sampling PDF is uniform, all samples get equal
-weight. If we uniformly sample the hemisphere, $\rho$ is a constant $\frac{1}{2\pi}$,[^ch9-footnote6]
-giving us
+where $\rho(\bar{\mathbf{x}})$ is the probability density function (PDF) used to choose
+a random sample $\bar{\mathbf{x}}$. When the sampling PDF is uniform, all samples get equal
+weight. If we uniformly sample the hemisphere, $\rho$ is a constant $\frac{1}{2\pi}$[^ch9-footnote6]
 
 $$
   attenuation = \frac{\frac{color}{\pi} ~ | \vec{\mathbf{N}} \cdot \omega_i |}{\frac{1}{2\pi}} = 2 ~ color ~ | \vec{\mathbf{N}} \cdot \omega_i |
@@ -5740,7 +5736,7 @@ since it's simpler.
 ![Figure [cosine-weighted-hemisphere-samples]: The yellow points were uniformly sampled on a sphere. The blue points result from projecting to the yellow points to a hemisphere aligned with the sphere](../images/fig-19-tangent-sphere.svg)
 
 We'll start by sampling two numbers between 0 and 1. We'll map one of these numbers to the
-$[-1, 1]$ range and use it as the $y$-coordinate. We'll map the other number to the $[0, 2]$ range
+$[-1, 1]$ range and use it as the $y$-coordinate. We'll map the other number to the $[0, 2\pi]$ range
 and use it as the spherical azimuth angle on the $xz$-plane.
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
@@ -5900,7 +5896,7 @@ albedo is the ratio of radiosity to irradiance.
 
 [^ch9-footnote5]: For a refresher on Monte Carlo integration, take a look at [_Ray Tracing: The Rest of Your Life_][RTTROYL], Chapters 3 and 4.
 
-[^ch9-footnote6]: This follows from the surface area of a unit hemisphere is equal to $2\pi$.
+[^ch9-footnote6]: The surface area of a unit hemisphere is equal to $2\pi$.
 
 [^ch9-footnote7]: See [Physically Based-Rendering: From Theory To Implementation, 4th Edition, A.5.3 "Cosine-Weighted Hemisphere Sampling"](https://pbr-book.org/4ed/Sampling_Algorithms/Sampling_Multidimensional_Functions#Cosine-WeightedHemisphereSampling).
 
@@ -5912,17 +5908,17 @@ the material. This approach results in surfaces that are opaque, though some mat
 transmit light without fully absorbing it. These materials can appear transparent or translucent according to certain
 physical properties, including how smooth the surface is and how light interacts with its molecules.
 
-The speed of light varies depending on the surrounding medium through which it propagates. For instance, the speed of
-light in vacuum is 299,792,458 m/s while the speed in glass approximately two-thirds of that (~199,861,638 m/s). When a
+The speed of light varies depending on the medium through which it propagates. The speed of
+light in vacuum is 299,792,458 m/s while the speed in glass is approximately two-thirds of that (~199,861,638 m/s). When a
 wave transitions between two media and undergoes a sudden change in its phase velocity (e.g. when when light enters
 glass from air, or when water waves travel from shallow to deep water) the wavefronts appear to change direction. This
 phenomenon is called _refraction_. The change in phase velocity is given by the material's
 _index of refraction_ (IOR)[^ch9-footnote8] and the change in direction is governed by _Snell's Law_.
 
-  ![Figure [refracting-wavefronts]: Wavefronts undergoing refraction at the transition to a different medium. (Image Credit: Oleg Alexandrov)](../images/Snells_law_wavefronts_by_Oleg_Alexandrov.gif class="small-gif" loop)
+  ![Figure [refracting-wavefronts]: Wavefronts undergoing refraction at the transition to a different medium. (Image Credit: Oleg Alexandrov, https://en.wikipedia.org/wiki/File:Snells_law_wavefronts.gif )](../images/Snells_law_wavefronts_by_Oleg_Alexandrov.gif class="small-gif" loop)
 
 The IOR for a given medium is defined as the ratio between the speed of light in that medium and $c$, the speed of light
-in vacuum. For example, glass with a IOR of 1.5 propagates light at $\frac{2}{3}c$. Here are the indices of
+in vacuum. For example, glass with a IOR of 1.5 propagates light at $\frac{2}{3}c.$ Here are the indices of
 refraction for some transparent materials (taken from _Physically Based Rendering: From Theory To Implementation_[^ch9-footnote8]):
 
      Medium | Index of refraction
@@ -5950,11 +5946,12 @@ In order to correctly implement refraction for a transmissive surface, we need t
 to specify an index of refraction. For a transmissive material, it makes sense to treat the scattering event at a
 ray-surface intersection as a transition from one type of medium (e.g. air) into a different type (e.g. glass).
 The surface of a sphere defines an enclosed volume, so the IOR relates the speed of light inside the sphere to the speed
-of light outside of it.
+of light outside.
 
-According to Snell's law, we need the ratio of the IOR values on both sides of the surface, i.e. the _relative_ index of refraction. We have a choice when it comes to the material definition: the
-material can either store the IOR relative to vacuum or it can store the relative IOR. The former is a little bit
-more complicated to implement, since we need to keep track of the IOR of the surrounding volume along the light transport
+According to Snell's law, we need the ratio of the IOR values on both sides of the surface, i.e. the _relative_
+index of refraction. We have a choice when it comes to the material definition: the material can either store the
+IOR relative to vacuum or it can directly store the relative IOR at the interface boundary. The former is a bit more
+complicated to implement, since we need to keep track of the IOR of the surrounding volume along the light transport
 path and compute the relative IOR when we intersect a transmissive material. We'll instead go with the second approach:
 if we want to place a glass sphere inside a volume of water, the material will store $\frac{\eta_{glass}}{\eta_{water}}$.
 This makes the implementation simpler though at the cost of some flexibility; for instance we can't easily
@@ -6036,7 +6033,7 @@ is 1.5 (approximately representing the air/glass interface). The color is set to
 transmit all light without any absorption.
 
 Let's now update the scatter function. Once again we're in luck: just like `reflect`, WGSL defines an intrinsic called
-`refract` to compute the refracted ray given an incident ray direction, a surface normal, and a relative index of
+`refract` to compute the refracted ray for an incident ray direction, a surface normal, and a relative index of
 refraction. Let's plug this into our `scatter` function:
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
@@ -6083,7 +6080,7 @@ to do with our use of `refract`, so let's consult the API documentation provided
 
 There are two important points being discussed here. Let's first focus on the second half: the input vectors need to be
 normalized. Our sphere intersection routine already returns a unit length normal vector, so let's generally assume
-that's always the case and `hit.normal` is already normalized. We can't really assume the same for the incident ray
+that's always the case and `hit.normal` is already normalized. We shouldn't assume the same for the incident ray
 direction, so let's update our code to explicitly normalize it:
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
@@ -6179,7 +6176,7 @@ the rest of the function. Fortunately, `intersect_scene` should treat this as "n
 the `hit.t > 0. && hit.t < closest_hit.t` check would evaluate to false. Because the procedure doesn't find any intersections,
 it moves on to compute the sky color with a null ray direction. The first thing that `sky_color` does with
 the ray direction is normalize it (`normalize(ray.direction).y`) which is implemented by dividing all components of
-a vector by its scalar magnitude (or "length"). The magnitude of a null vector is $0$, so dividing $0$ by $0$ produces
+a vector by its scalar magnitude (or "length"). The magnitude of a null vector is $0,$ so dividing $0$ by $0$ produces
 a `t` value of NaN. This means that whenever a light transport path intersects our buggy sphere, our program computes a
 received radiance of NaN and stores it in the radiance texture, poisoning all future samples for that pixel.
 
@@ -6459,15 +6456,15 @@ segment.
 Let's imagine the combined reflection and transmission distributions (i.e. the BRDF and BTDF) for
 a dielectric as a unified _BSDF_ (i.e. a Bi-directional _scattering_ distribution function). The
 Fresnel factor represents the relative distribution of reflected and transmitted rays, in other
-words it is the likelihood that a ray gets reflected instead of transmitted.[^ch9-footnote20] As we
-have done for other distributions, we can sample the BSDF one segment at a time and integrate the
-result over time.
+words it provides the likelihood that a ray gets reflected instead of transmitted.[^ch9-footnote20]
+We can use this as a PDF to sample the BSDF one segment at a time and integrate the result over
+many frames, just as we did for the Lambertian distribution.
 
 After the check for total internal reflection we are going to randomly decide whether to reflect or
 refract using the Fresnel reflectance as the probability of reflecting. This choice of probability
 actually fits well into our Monte Carlo framework, in that we are selecting a distribution that
 closely matches the BSDF in much the same way as our choice of the cosine-weighted hemisphere
-distribution matches the Lambertian BRDF.
+distribution matches the Lambertian BRDF (i.e. the weights cancel out).
 
 With that, let's reorganize the code to make the flow control more clear. We'll repurpose the
 `is_specular` variable to represent whether we chose specular reflection over other scattering types
@@ -6566,7 +6563,8 @@ attenuation at grazing angles, and see more of the color of the material at $F_0
 the transmitted portion of the incident light should get fully attenuated but not the reflected portion.
 
 Let's special case the Fresnel reflection and set the attenuation to $1$. Since our sampling probability matches the
-Fresnel reflectance, the attenuation will interpolate between the base color and $1$ based on the viewing angle:
+Fresnel reflectance, the attenuation will naturally interpolate between the base color and $1$ based on the viewing
+angle:
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
     ...
@@ -7292,13 +7290,13 @@ from the specular and diffuse attenuation factors:
 You should notice a difference in the amount of noise (especially when you move the camera). Here is a close-up of
 the before and after. Both screenshots were taken after running the program for about 5 seconds:
 
-  ![Before, with $\rho_{specular} = 0.5$](../images/img-52-metallic-noisy.png height=350px) ![After, with the weighted PDF](../images/img-51-metallic-not-noisy.png height=350px)
+  ![Before, $\rho_{specular} = 0.5$](../images/img-52-metallic-noisy.png height=350px) ![After, $\rho_{specular} = \frac{S}{S + D}$](../images/img-51-metallic-not-noisy.png height=350px)
 
 
 [^ch9-footnote22]: You can implement a similar effect by placing a diffuse sphere inside a dielectric sphere. If the
 spheres are concentric then the thickness of the dielectric layer is equal to the difference of their radii.
 
-[^ch9-footnote23]: This normalized form of luminance (where $1$ is the "perfect white") is called _relative luminance_. This specific formula comes from ITU-R BT.709 standard used for color displays. The $Y$ refers to the first component in the $YC_BC_R$ color space which encodes video as the combination of "perceived brightness", "redness", and "blueness". This is closely related to the $YUV$ format used in analog television broadcast which is itself derived from the original CIE XYZ color space published in 1931. The history of color science and how color exchange formats evolved through the history of television and computer displays is quite fascinating.
+[^ch9-footnote23]: This normalized form of luminance (where $1$ is the "perfect white") is called _relative luminance_. This specific formula comes from the ITU-R BT.709 standard used for color displays. The $Y$ refers to the first component in the $YC_BC_R$ color space which encodes video as the combination of "perceived brightness", "redness", and "blueness". This is closely related to the $YUV$ format used in analog television broadcast which is itself derived from the original CIE XYZ color space published in 1931. The history of color science and how color exchange formats evolved through the history of television and computer displays is quite fascinating.
 
 <!--
 -->
