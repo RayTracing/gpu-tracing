@@ -6429,7 +6429,11 @@ $$
 
 Let's quickly translate this to code. If you look closely, the Schlick formula blends between $F_0$ and $1$ using
 $(1 - cos ~ \theta_i)^5$ as the blend factor. This is a simple enough expression that you can just type it out exactly,
-or use the [`mix`](https://www.w3.org/TR/WGSL/#mix-builtin) intrinsic:
+or use the [`mix`](https://www.w3.org/TR/WGSL/#mix-builtin) intrinsic. Mix is a convenient utility function that
+implements a _linear interpolation_ or _linear blend_. This is an extremely common operation in Computer Graphics
+and is used to mix two values with a weight between them. Given two values $a$ and $b$, their linear blend using weight
+$x$ can be expressed as $a (1 - x) + bx$ or alternately $a + (b - a)x$. This latter form matches the Schlick formula
+above, which blends between $F_0$ and $1$ using $(1 - cos~\theta)^5$ as the weight:
 
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
