@@ -6998,15 +6998,31 @@ to incorporate its color into $F_0$ while simultaneously reducing its diffuse re
 
 The Fresnel reflectance $F$ -- i.e. the value returned by `schlick_fresnel` -- _is_ the correct
 specular attenuation value. We have so far simply assigned `vec3(1.)` because we chose $F$ to be the specular
-probability and the terms cancel out when we apply the Monte Carlo formula. The diffuse probability (i.e. the
-probability of _not_ choosing specular) is by definition $1 - F$, so it follows that the diffuse reflectance value
-we're effectively computing is $color * (1 - F)$. The accummulated color is, in some sense, a linear blend between
-$1$ and $color$, where $F$ is the blend factor: $1 * F + color * (1 - F)$.
+probability and the weight simply manifested itself through the distribution of samples over time. If we think back
+to the Monte Carlo formula, we ended up with
+
+$$
+\frac{f(\bar{\mathbf{x}})}{\rho(\bar{\mathbf{x}})} = \frac{F}{F} = 1
+$$
+
+The diffuse probability (i.e. the probability of _not_ choosing specular) is by definition $1 - F$, so it follows
+that the diffuse reflectance value that we are computing is effectively $color * (1 - F)$. As the specular and diffuse
+samples combine over time, the accummulated color becomes, in some sense, a linear blend between $1$ and $color$,
+where $F$ is the blend factor: $1 * F + color * (1 - F)$.
 
 Let's verify this by choosing between specular and diffuse with equal probability and let's compute the reflectance
 values explicitly without canceling out the terms. This will result in a noisier image that takes longer to resolve,
 particularly when `specular_or_ior` is closer to the extremes (where the desired distribution is not 50%). However,
-the final output should look the same:
+the final output should look the same. We are going to compute specular attenuation and diffuse attenuation
+both using $\rho(\bar{\mathbf{x}}) = 0.5$:
+
+$$
+\begin{eqnarray}
+specular &=& \frac{f_{specular}(\bar{\mathbf{x}})}{\rho(\bar{\mathbf{x}})} = \frac{F}{0.5} \nonumber \\
+diffuse &=& \frac{f_{diffuse}(\bar{\mathbf{x}})}{\rho(\bar{\mathbf{x}})} = \frac{color (1 - F)}{0.5} \nonumber
+\end{eqnarray}
+$$
+
 
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
