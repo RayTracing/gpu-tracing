@@ -177,13 +177,13 @@ fn scatter(input_ray: Ray, hit: Intersection, material: Material) -> Scatter {
   let u5 = u * u * u * u * u;
 
   // Determine whether to use specular reflection.
-  var is_specular = false;
+  var choose_specular = false;
   var attenuation = material.color;
   if is_transmissive {
     let cannot_refract = ref_ratio * ref_ratio * (1.0 - cos_theta * cos_theta) > 1.;
     let f0 = schlick_f0_from_ior(ref_ratio);
-    is_specular = cannot_refract || mix(f0, 1., u5) > rand_f32();
-    if is_specular {
+    choose_specular = cannot_refract || mix(f0, 1., u5) > rand_f32();
+    if choose_specular {
       attenuation = vec3(1.);
     }
   } else if material.metallic_or_ior > 0. {
@@ -198,8 +198,8 @@ fn scatter(input_ray: Ray, hit: Intersection, material: Material) -> Scatter {
     let D = luminance(diffuse);
     let specular_pdf = S / (S + D);
 
-    is_specular = specular_pdf > rand_f32();
-    if is_specular {
+    choose_specular = specular_pdf > rand_f32();
+    if choose_specular {
       attenuation = specular / specular_pdf;
     } else {
       attenuation = diffuse / (1. - specular_pdf);
@@ -207,7 +207,7 @@ fn scatter(input_ray: Ray, hit: Intersection, material: Material) -> Scatter {
   }
 
   var scattered: vec3f;
-  if is_specular {
+  if choose_specular {
     scattered = reflect(incident, N);
   } else if is_transmissive {
     scattered = refract(incident, N, ref_ratio);
