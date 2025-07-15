@@ -6,7 +6,7 @@ const EPSILON: f32 = 1e-3;
 const TWO_PI: f32 = 6.2831853;
 
 const MAX_PATH_LENGTH: u32 = 13u;
-const GLASS_F0: f32 = 0.04;
+const GLASS_F0: vec3f = vec3(0.04);
 
 struct Uniforms {
   camera: CameraUniforms,
@@ -160,16 +160,6 @@ fn schlick_f0_from_ior(ior: f32) -> f32 {
   return sqrt_f0 * sqrt_f0;
 }
 
-fn schlick_fresnel(f0: f32, cos_theta: f32) -> f32 {
-  let u = 1 - cos_theta;
-  return mix(f0, 1., u * u * u * u * u);
-}
-
-fn schlick_fresnel_vec3(f0: vec3f, cos_theta: f32) -> vec3f {
-  let u = 1 - cos_theta;
-  return mix(f0, vec3(1.), u * u * u * u * u);
-}
-
 fn scatter(input_ray: Ray, hit: Intersection, material: Material) -> Scatter {
   let incident = normalize(input_ray.direction);
   let incident_dot_normal = dot(incident, hit.normal);
@@ -182,28 +172,32 @@ fn scatter(input_ray: Ray, hit: Intersection, material: Material) -> Scatter {
   let ior = abs(material.metallic_or_ior);
   let ref_ratio = select(ior, 1. / ior, is_front_face);
 
+  // The (1 - cos(theta))^5 term from the Schlick approximation.
+  let u = 1 - cos_theta;
+  let u5 = u * u * u * u * u;
+
   // Determine whether to use specular reflection.
   var is_specular = false;
   var attenuation = material.color;
   if is_transmissive {
     let cannot_refract = ref_ratio * ref_ratio * (1.0 - cos_theta * cos_theta) > 1.;
     let f0 = schlick_f0_from_ior(ref_ratio);
-    is_specular = cannot_refract || schlick_fresnel(f0, cos_theta) > rand_f32();
+    is_specular = cannot_refract || mix(f0, 1., u5) > rand_f32();
     if is_specular {
       attenuation = vec3(1.);
     }
   } else if material.metallic_or_ior > 0. {
     let metallic = material.metallic_or_ior;
-    let f0 = mix(vec3(GLASS_F0), material.color, metallic);
-    let diffuse_color = material.color * (1. - metallic);
+    let f0 = mix(GLASS_F0, material.color, metallic);
+    let F = mix(f0, vec3(1.), u5);
 
-    let F = schlick_fresnel_vec3(f0, cos_theta);
     let specular = F;
-    let diffuse = diffuse_color * (1. - F);
+    let diffuse = (material.color - GLASS_F0) * (1. - metallic) * (1. - u5);
 
     let S = luminance(specular);
     let D = luminance(diffuse);
     let specular_pdf = S / (S + D);
+
     is_specular = specular_pdf > rand_f32();
     if is_specular {
       attenuation = specular / specular_pdf;
@@ -259,13 +253,13 @@ var<private> materials: Materials = Materials(
 );
 
 var<private> scene: Scene = Scene(
-  Sphere(/*center*/ vec3(-1.1, 0.5, 1.), /*radius*/ 0.5, /*material_index*/ 0),
-  Sphere(/*center*/ vec3(0., 0.5, 1.),   /*radius*/ 0.5, /*material_index*/ 1),
-  Sphere(/*center*/ vec3(1.1, 0.5, 1.),  /*radius*/ 0.5, /*material_index*/ 3),
+  Sphere(/*center*/ vec3(-1.1, 0.5, 0.), /*radius*/ 0.5, /*material_index*/ 0),
+  Sphere(/*center*/ vec3(0., 0.5, 0.),   /*radius*/ 0.5, /*material_index*/ 1),
+  Sphere(/*center*/ vec3(1.1, 0.5, 0.),  /*radius*/ 0.5, /*material_index*/ 3),
 
-  Sphere(/*center*/ vec3(-1.1, 0.5, -1.), /*radius*/ 0.5, /*material_index*/ 4),
-  Sphere(/*center*/ vec3(0., 0.5, -1.),   /*radius*/ 0.5, /*material_index*/ 5),
-  Sphere(/*center*/ vec3(1.1, 0.5, -1.),  /*radius*/ 0.5, /*material_index*/ 6),
+  Sphere(/*center*/ vec3(-1.1, 0.5, -2.), /*radius*/ 0.5, /*material_index*/ 4),
+  Sphere(/*center*/ vec3(0., 0.5, -2.),   /*radius*/ 0.5, /*material_index*/ 5),
+  Sphere(/*center*/ vec3(1.1, 0.5, -2.),  /*radius*/ 0.5, /*material_index*/ 6),
 
   // Ground
   Sphere(/*center*/ vec3(0., -2e2 - EPSILON, 0.), /*radius*/ 2e2, /*material_index*/ 2),
