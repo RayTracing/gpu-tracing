@@ -5434,10 +5434,10 @@ represented in the return type (the `Scatter` struct) as an attenuation factor a
 
 The appearance of a real-world object depends on its material composition. This includes surface
 features like overall smoothness, as well as molecular properties like electrical conductivity and
-crystal structure. Renderers used in game and move production frequently rely on approximations with
+crystal structure. Renderers used in game and movie production frequently rely on approximations with
 parameters that an artist can tune to achieve a particular appearance.
 
-We have already defined the first material parameter: _color_ (Section [colored spheres]). It is
+We have already defined the first material parameter _color_ (Section [colored spheres]). It is
 currently declared as a field of the `Sphere` data structure and used to compute the attenuation
 factor in `scatter`. Let's introduce a new data structure called `Material` and store the color
 there instead. We'll declare a separate array to store the `Material` instances and have each
@@ -5600,7 +5600,7 @@ reflectance_ in which the reflected radiance is the same in all directions.
 To correctly render a diffuse surface we need to consider the entire hemisphere over which the
 surface receives light. This involves potentially tracing infinitely many rays in all directions
 and combining their radiance contributions. Tracing infinitely many rays at once to cover every
-fraction of a continuous hemisphere isn't plausible, however, sampling a large number of directions
+fraction of a continuous hemisphere isn't plausible, however, randomly sampling a large number of directions
 and taking their average over time works quite well. We already have the mechanism to distribute
 samples temporally -- all we need to do is pick a random direction (facing outward from the surface)
 as the next path segment. We can do so by uniformly sampling a point over the unit hemisphere that
@@ -5613,7 +5613,7 @@ few things consider if the material should resemble an accurate Lambertian surfa
 Radiance is a term borrowed from radiometry that is defined as
 radiant power per unit surface area per unit solid angle[^ch9-footnote1]. The solid angle constrains
 the measured radiant power (the light energy per unit time) to a small set of directions and the
-surface area represents a unit patch of the reflecting surface. Intuitively, radiance is defined
+surface area defines a unit patch of the reflecting surface. Intuitively, radiance is defined
 over a volume through space rather than a dimensionless ray. Hence, when discussing the flow of
 light energy, the intersection is typically treated as a tiny surface patch with non-zero area
 rather than a dimensionless point.
@@ -5807,7 +5807,7 @@ we are not going to cover them in this book.
 We now have two material types to choose from. Let's add a new field to the `Material` structure
 that stores the type of reflectance the material exhibits. For now let's declare this as an integer
 with "1" representing specular and "0" representing lambertian. We can use this to create a scene
-with both kinds of material with various colors:
+with both types of material with various colors:
 
 
 <script type="preformatted">
@@ -7018,8 +7018,8 @@ both using $\rho(\bar{\mathbf{x}}) = 0.5$:
 
 $$
 \begin{eqnarray}
-specular &=& \frac{f_{specular}(\bar{\mathbf{x}})}{\rho(\bar{\mathbf{x}})} = \frac{F}{0.5} \nonumber \\
-diffuse &=& \frac{f_{diffuse}(\bar{\mathbf{x}})}{\rho(\bar{\mathbf{x}})} = \frac{color (1 - F)}{0.5} \nonumber
+\text{specular} &=& \frac{f_{\text{specular}}(\bar{\mathbf{x}})}{\rho(\bar{\mathbf{x}})} = \frac{F}{0.5} \nonumber \\
+\text{diffuse} &=& \frac{f_{\text{diffuse}}(\bar{\mathbf{x}})}{\rho(\bar{\mathbf{x}})} = \frac{color~(1 - F)}{0.5} \nonumber
 \end{eqnarray}
 $$
 
@@ -7376,7 +7376,7 @@ Let's plug this in and see what happens:
 
 Good news and bad news: the color looks correct towards the center of each sphere where the view direction is at
 normal incidence. Unfortunately the color gets brighter at grazing angles. Such a material is said to be
-_non energy preserving_, as the material increases the total energy in the scene.
+_non energy conserving_, as the material increases the total energy in the scene.
 
 Note that we still need to include a Fresnel factor to make sure that the diffuse term goes to zero at grazing angles.
 Ideally, we should have $D = 0$ when $cos~\theta = 0$ and get the above solution when $cos~\theta = 1$. In-between
@@ -7421,11 +7421,11 @@ grazing angles. Let's try $D = (C - F_0^{glass})(1 - metallic)(1 - (1 - cos~\the
 
 This should result in the following image:
 
-  ![Figure [white-furnace-test-3]: White furnace test with energy preserving materials](../images/img-55-white-furnace-test-3.png)
+  ![Figure [white-furnace-test-3]: White furnace test with energy conserving materials](../images/img-55-white-furnace-test-3.png)
 
 This result looks correct since there seems to be no energy loss or gain. I won't prove here why this formulation
-is energy-preserving and leave it as an exercise.[^ch9-footnote23] Let's revert the scene back to the way it was before
-the white furnace test and see how things look now:
+is energy-conserving for all values of $cos~\theta$ and leave that to you as an exercise.[^ch9-footnote23] Let's
+revert the scene back to the way it was before the white furnace test and see the result:
 
 <script type="preformatted">
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
@@ -7478,7 +7478,7 @@ the white furnace test and see how things look now:
     [Listing [revert-furnace-test]: <kbd>[shaders.wgsl]</kbd> Revert the white furnace test]
 </script>
 
-  ![Figure [fixed-metallic]: Spheres with different metallic parameters](../images/img-56-fixed-metallic.png)
+  ![Figure [fixed-metallic]: Spheres with varying metalness](../images/img-56-fixed-metallic.png)
 
 All three spheres look noticeably brighter. More importantly, they have exactly the same color while their reflectance
 properties vary.
@@ -7744,7 +7744,7 @@ Here is a close-up of the before and after. Both screenshots were taken after ru
 
 [^ch9-footnote24]: See _Physically Based Shading at Disney_ by Brent Burley
 
-[^ch9-footnote25]: This normalized form of luminance (where $1$ is the "perfect white") is called _relative luminance_. This specific formula comes from the ITU-R BT.709 standard used for color displays. The $Y$ refers to the first component in the $YC_BC_R$ color space which encodes video as the combination of "perceived brightness", "redness", and "blueness". This is closely related to the $YUV$ format used in analog television broadcast which is itself derived from the original CIE XYZ color space published in 1931. The history of color science and how color exchange formats evolved through the history of television and computer displays is quite fascinating.
+[^ch9-footnote25]: This normalized form of luminance (where $1$ is the "perfect white") is called _relative luminance_. This specific formula comes from the ITU-R BT.709 standard used for color displays. The $Y$ refers to the first component in the $YC_BC_R$ color space which encodes video as the combination of "perceived brightness", "redness", and "blueness". This is closely related to the $YUV$ format used in analog television broadcast which is itself derived from the original CIE XYZ color space published in 1931. The history of color science and how color exchange formats evolved over the development of television and computer displays is quite fascinating.
 
 
 <!--
