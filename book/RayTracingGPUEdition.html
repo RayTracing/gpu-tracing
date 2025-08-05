@@ -990,7 +990,7 @@ created earlier:
             // End the render pass by consuming the object.
             drop(render_pass);
 
-            let command_buffer = encoder.finish()
+            let command_buffer = encoder.finish();
             self.queue.submit(Some(command_buffer));
         }
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
@@ -1128,7 +1128,7 @@ count:
             // End the render pass by consuming the object.
             drop(render_pass);
 
-            let command_buffer = encoder.finish()
+            let command_buffer = encoder.finish();
             self.queue.submit(Some(command_buffer));
         }
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
@@ -5600,11 +5600,11 @@ reflectance_ in which the reflected radiance is the same in all directions.
 To correctly render a diffuse surface we need to consider the entire hemisphere over which the
 surface receives light. This involves potentially tracing infinitely many rays in all directions
 and combining their radiance contributions. Tracing infinitely many rays at once to cover every
-fraction of a continuous hemisphere isn't plausible, however, randomly sampling a large number of directions
-and taking their average over time works quite well. We already have the mechanism to distribute
-samples temporally -- all we need to do is pick a random direction (facing outward from the surface)
-as the next path segment. We can do so by uniformly sampling a point over the unit hemisphere that
-is aligned with the surface normal.
+fraction of a continuous hemisphere isn't plausible, however, randomly sampling a large number of
+directions and taking their average over time works quite well. We already have the mechanism to
+distribute samples temporally -- all we need to do is pick a random direction (facing outward from
+the surface) as the next path segment. We can do so by uniformly sampling a point over the unit
+hemisphere that is aligned with the surface normal.
 
 Now we come to the attenuation. Our perfect mirror implementation directly returns the material
 color. We could do the same for the diffuse material and get a pretty decent result but there are a
