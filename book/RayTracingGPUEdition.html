@@ -5667,38 +5667,43 @@ Let's ignore $I$ for a moment and only consider the Lambertian surface albedo. R
 the material color, the BRDF becomes a constant and we can pull it out of the integral:
 
 $$
-  albedo = color ~ \int_\Omega | \vec{\mathbf{N}} \cdot \omega | ~ d\omega
+\text{albedo} = \text{color} ~ \int_\Omega | \vec{\mathbf{N}} \cdot \omega | ~ d\omega
 $$
 
 The integral simply reduces to $\pi$[^ch9-footnote4] which leads to $albedo = \pi ~ color$. The
-Lambertian BRDF is typically defined as $\frac{color}{\pi}$ in order to make albedo equal to the
-material color. This is somewhat a matter of choice but we're going to stick with this definition
-in the rest of this book, such that the Lambertian attenuation for any two given light directions
-becomes
+Lambertian BRDF is typically defined as $\frac{color}{\pi}$ in order to make the albedo equal to the
+material color. We're going to stick with this definition in the rest of this book, so the
+integral for a Lambertian surface becomes:
 
 $$
-  \frac{color}{\pi} ~ | \vec{\mathbf{N}} \cdot \omega_i |
+I_{\text{lambertian}}(\omega_o) = \int_\Omega \frac{\text{color}}{\pi} ~ | \vec{\mathbf{N}} \cdot \omega_i | ~ I(\omega_i) ~ d\omega_i
 $$
 
-Except, we aren't computing the integral analytically but rather by random sampling using
-_Monte Carlo Integration_[^ch9-footnote5], so we also need to weigh each sample by its probability.
-Suppose we have some function $g(x)$ that we want to integrate over some domain $A$ by drawing $N$
-random samples from some probability distibution $\rho$. The integral can be approximated as
+The first part of the integrand is our Lambertian attenuation factor: $\frac{\text{color}}{\pi} ~ | \vec{\mathbf{N}} \cdot \omega_i |$.
+
+When computing an integral with random samples, the way the samples are chosen have an impact on the final
+result. Suppose we have some function $g(x)$ that we want to integrate over some domain $A$. This integral
+can be approximated by drawing $N$ random samples from some probability distibution $\rho$ using the following
+formula:
 
 $$
   \int_A g(x) ~ dx \approx \dfrac{1}{N}\sum_{\bar{\mathbf{x}}}^N \dfrac{g(\bar{\mathbf{x}})}{\rho(\bar{\mathbf{x}})}
 $$
 
-where $\rho(\bar{\mathbf{x}})$ is the probability density function (PDF) used to choose
-a random sample $\bar{\mathbf{x}}$. When the sampling PDF is uniform, all samples get equal
-weight. If we uniformly sample the hemisphere, $\rho$ is a constant $\frac{1}{2\pi}$[^ch9-footnote6]
+This technique is called _Monte Carlo Integration_.[^ch9-footnote5] $\rho(\bar{\mathbf{x}})$ is the
+probability density function (PDF) used to choose a random sample $\bar{\mathbf{x}}$ over the integration
+domain. While the PDF can be any random distribution, its choice directly impacts how many samples it takes
+to correctly approximate the integral.
+
+When the sampling PDF is uniform, all samples get equal weight. If we uniformly sample the hemisphere,
+$\rho$ is a constant $\frac{1}{2\pi}$[^ch9-footnote6]:
 
 $$
-  attenuation = \frac{\frac{color}{\pi} ~ | \vec{\mathbf{N}} \cdot \omega_i |}{\frac{1}{2\pi}} = 2 ~ color ~ | \vec{\mathbf{N}} \cdot \omega_i |
+\text{attenuation} = \frac{\frac{\text{color}}{\pi} ~ | \vec{\mathbf{N}} \cdot \omega_i |}{\frac{1}{2\pi}} = 2 ~ \text{color} ~ | \vec{\mathbf{N}} \cdot \omega_i |
 $$
 
-This gives us a correct solution and the resulting albedo equals the material color. As it turns
-out, this isn't the most efficient sampling distribution. Think about the lower parts of the
+This gives us a correct solution and the resulting albedo equals the material color. However, the
+sampling distribution isn't efficient. Think about the lower parts of the
 hemisphere where rays are almost tangent to the surface and the dot product is near zero. Radiance
 computed by tracing paths in these directions will get attenuated so much that they won't
 significantly contribute to the resulting image. Since these directions are somewhat "unimportant",
@@ -5710,14 +5715,14 @@ them less frequently by picking a $\rho$ that is proportional to $| \vec{\mathbf
 _higher_ to make up for the fact that we sampled those directions less frequently (hence the division
 by $\rho(\bar{\mathbf{x}})$ in the Monte Carlo formula).
 
-![Uniform hemisphere distribution](../images/fig-18-uniform-dist.png) ![Cosine-weighted hemisphere distribution](../images/fig-18-cosine-weighted-dist.png)
+![Uniform samples over the hemisphere](../images/fig-18-uniform-dist.png) ![Cosine-weighted samples over the hemisphere](../images/fig-18-cosine-weighted-dist.png)
 
-Now here is the fun bit: we'll use a cosine-weighted distribution such that
-$\rho = \frac{|\vec{\mathbf{N}}\cdot\omega_i|}{\pi}.$[^ch9-footnote7] This is a very commonly used
-distribution for diffuse BRDFs. If we plug this into the formula for our attenuation factor we get:
+A common trick is to use a cosine-weighted distribution such that
+$\rho = \frac{|\vec{\mathbf{N}}\cdot\omega_i|}{\pi}.$[^ch9-footnote7] If we plug this into the formula
+for our attenuation factor we get:
 
 $$
-  attenuation = \frac{\frac{color}{\pi} ~ | \vec{\mathbf{N}} \cdot \omega_i |}{\frac{|\vec{\mathbf{N}}\cdot\omega_i|}{\pi}} = color
+\text{attenuation} = \frac{\frac{\text{color}}{\pi} ~ | \vec{\mathbf{N}} \cdot \omega_i |}{\frac{|\vec{\mathbf{N}}\cdot\omega_i|}{\pi}} = \text{color}
 $$
 
 This perfectly matches the Lambertian BRDF. Since the factors all cancel out, we can use _color_
@@ -5799,8 +5804,7 @@ Making this change should give us two Lambertian spheres:
 You may see a little bit of noise at first but the image should resolve fast if you have a decent
 GPU. The noise will be a lot more noticeable when you move the camera since the accumulated samples
 in the radiance texture get reset on input events. While we did this to avoid ghosting, the noise
-is just as undesirable in a real-time application. There are strategies to reduce the noise but
-we are not going to cover them in this book.
+is just as undesirable in a real-time application.
 
   ![Figure [noise-camera-movement]: (video) We see noise when the accumulation texture gets cleared](../images/vid-08-noise-lambertian.mp4 autoplay muted loop)
 
@@ -6308,7 +6312,7 @@ the total internal reflection case but the black sphere inside should look diffe
 
 We now have two distinct scenarios in which the scatter routine can choose a specular reflection. Instead of
 having nested branches, let's unify the control flow that can result in a specular reflection. This will help keep
-things clean when we later introduce new situations that can result in a specular reflection:
+things clean when we later introduce other situations that can result in a specular reflection:
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
     ...
@@ -6367,10 +6371,10 @@ Dielectric BSDF
 Most materials exhibit a mixture of transmission and reflection. Water and glass are both mostly transparent when viewed
 head on but appear increasingly more mirror-like at grazing angles. The mechanisms that give rise to this effect depend
 on the physical properties of the surface material as well as the wavelength and polarization of the incident light.
-Rendering such a surface accurately would require us to compute both the reflected and transmitted radiance and combine
+To render such a surface accurately we have to compute both the reflected and transmitted radiance and combine
 them using some view-dependent ratio that is plausible for what we want to simulate.
 
-A common method to compute this ratio is to use the Fresnel equations.[^ch9-footnote16] The Fresnel equations relate
+A physics-based method to compute this ratio is to use the Fresnel equations.[^ch9-footnote16] The Fresnel equations relate
 the surface reflectance (i.e. the reflected
 portion of the incident beam) to the angle of incidence and the indices of refraction at the surface
 interface.[^ch9-footnote17]
@@ -6386,7 +6390,7 @@ R_{\parallel} = \left(\frac{\eta ~ cos ~ \theta_i - cos ~ \theta_t}{\eta ~ cos ~
 R_{\bot} = \left(\frac{cos ~ \theta_i - \eta ~ cos ~ \theta_t}{ cos ~ \theta_i + \eta ~ cos ~ \theta_t}\right)^2
 $$
 
-where $\eta$ is the relative index of refraction, $\theta_i$ is the angle of the incident ray, and $\theta_t$ is angle
+where $\eta$ is the relative index of refraction, $\theta_i$ is the angle of the incident ray, and $\theta_t$ is the angle
 of refraction given by Snell's law. We can implement these equations directly for a system that takes
 polarization into account. We can also take their average to derive a single unpolarized
 _Fresnel reflectance_ factor.[^ch9-footnote17] Alternately, we can resort to an approximation that looks good enough
@@ -6451,7 +6455,7 @@ above, which blends between $F_0$ and $1$ using $(1 - cos~\theta)^5$ as the weig
     [Listing [schlick-fresnel]: <kbd>[shaders.wgsl]</kbd> The `schlick_fresnel` function]
 
 Now, if the material is transmissive we need to compute the contributions from both the refracted
-and reflected paths and blend them with the Fresnel factor. This would involve tracing both paths
+and reflected paths and blend them with the Fresnel factor. This involves tracing both paths
 all the way to a light source. This is difficult to do in our current setup in which the loop in
 the shader's entry point iterates over a single path and invokes `scatter` once for every path
 segment.
@@ -6467,7 +6471,7 @@ After the check for total internal reflection we are going to randomly decide wh
 refract using the Fresnel reflectance as the probability of reflecting. This choice of probability
 actually fits well into our Monte Carlo framework, in that we are selecting a distribution that
 closely matches the BSDF in much the same way as our choice of the cosine-weighted hemisphere
-distribution matches the Lambertian BRDF (i.e. the weights cancel out).
+distribution matched the Lambertian BRDF (i.e. the weights cancel out).
 
 With that, let's introduce a new `choose_specular` variable to represent whether we chose specular
 reflection over other scattering types and factor in the Fresnel-weighted probability:
@@ -6562,7 +6566,7 @@ That doesn't look like glass as it is missing the sheen that's characteristic of
 defined as black, the dielectric material should appear somewhat reflective. Remember that we are currently using the
 material color directly as the attenuation factor but ideally the attenuation should match the reflectance given by
 the Fresnel equations. Given that $F_{90}$ is $1$, we should see a mirror reflection of all color channels without
-attenuation at grazing angles, and see more of the color of the material at $F_0$.[^ch9-footnote21] In other words,
+attenuation at grazing angles, and see more of the material color at $F_0$.[^ch9-footnote21] In other words,
 the transmitted portion of the incident light should get fully attenuated but not the reflected portion.
 
 Let's special case the Fresnel reflection and set the attenuation to $1$. Since our sampling probability matches the
@@ -6617,8 +6621,8 @@ reflectance matters for opaque materials too.
 
 While this isn't exactly physically accurate -- real glass doesn't absorb all light at the surface but rather gradually
 attenuates it as light scatters inside the material -- this still gives us a plausible look. Try out different colors and
-see how that changes the overall appearance. (For example, some common glass varieties have a slightly greenish tint due
-to iron-oxide impurities).
+see how that changes the overall appearance. For example, some common glass varieties have a slightly greenish tint due
+to iron-oxide impurities.
 
 
 ### A More Compact Representation
@@ -6832,8 +6836,8 @@ the new spheres are in view:
 
 This behaves exactly the way I would expect. It gets us part of the way there, though something important is missing:
 Fresnel reflectance. The materials that I listed earlier (such as ceramic and plastic) are dielectrics. The material
-would look more natural if reflectance varied with the viewing angle and exhibited a color shift (like the black
-dielectric from the end of the previous section). I took some pictures from around my house to demonstrate what this
+would look more natural if reflectance varied with the viewing angle and exhibited a color shift like the black
+dielectric from the end of the previous section. I took some pictures from around my house to demonstrate what this
 looks like on some real-world objects:
 
   ![Reflection of the paper towel roll is barely visible at normal incidence](../images/img-41-paper-towel-diffuse.png) ![Reflection more visible at 45 degrees](../images/img-42-paper-towel-inbetween.png) ![Reflection clearly visible at a grazing angle](../images/img-43-paper-towel-specular.png)
@@ -6874,7 +6878,7 @@ surfaces. For now, let's hardcode 1.5 (the IOR of glass) and see how that looks:
 
   ![Figure [mixed-brdf-with-glass-ior]: Mixed BRDF with glass IOR](../images/img-46-mixed-brdf-with-glass-ior.png)
 
-That looks better. Note that we are using the IOR to only determine the reflectance at normal incidence
+That looks really nice. Note that we are using the IOR to only determine the reflectance at normal incidence
 (i.e. $F_0 = \left(\frac{\eta - 1}{\eta + 1}\right)^2$) since it's not necessary to compute a refracted ray. Let's
 try assigning $F_0$ directly from `specular_or_ior`. We'll also refactor `schlick_fresnel` to accept $F_0$ as a
 parameter:
@@ -6934,7 +6938,7 @@ parameter:
 
 ### Metalness
 
-We're getting closer but there are some issues. First, when $F_0$ is $0$ the surface still appears glossy due to
+We're getting closer but there are some issues. First, when $F_0$ is $0$ the surface still appears somewhat shiny due to
 Fresnel reflectance even though we want a $0$ valued `specular_or_ior` to represent a perfectly diffuse surface. That's
 easy enough to fix: let's make $0$ a special case in which reflections are always Lambertian:
 
@@ -6992,7 +6996,7 @@ incidence, the diffuse reflectance accounts for a bigger portion of the appearan
 since most dielectrics have fairly small values of $F_0$ (less than $0.1$ for many materials except diamonds).
 
 Unlike dielectrics, Metals have high values of $F_0$ (almost always 0.5 or above) and they exhibit colored
-reflections.[^ch9-footnote22] Any transmitted light gets rapidly absorbed into the material, so they do not exhibit any
+reflections.[^ch9-footnote22] Any transmitted light gets rapidly absorbed by the material, so metals do not exhibit any
 sub-surface scattering -- as such no diffuse reflectance. If we want a material to appear "more metallic", we need a way
 to incorporate its color into $F_0$ while simultaneously reducing its diffuse reflectance.
 
@@ -7006,9 +7010,9 @@ $$
 $$
 
 The diffuse probability (i.e. the probability of _not_ choosing specular) is by definition $1 - F$, so it follows
-that the diffuse reflectance value that we are computing is effectively $color * (1 - F)$. As the specular and diffuse
+that the diffuse reflectance value that we want to compute is effectively $\text{color} * (1 - F)$. As the specular and diffuse
 samples combine over time, the accummulated color becomes, in some sense, a linear blend between $1$ and $color$,
-where $F$ is the blend factor: $1 * F + color * (1 - F)$.
+where $F$ is the blend factor: $1 * F + \text{color} * (1 - F)$.
 
 Let's verify this by choosing between specular and diffuse with equal probability and let's compute the reflectance
 values explicitly without canceling out the terms. This will result in a noisier image that takes longer to resolve,
@@ -7019,7 +7023,7 @@ both using $\rho(\bar{\mathbf{x}}) = 0.5$:
 $$
 \begin{eqnarray}
 \text{specular} &=& \frac{f_{\text{specular}}(\bar{\mathbf{x}})}{\rho(\bar{\mathbf{x}})} = \frac{F}{0.5} \nonumber \\
-\text{diffuse} &=& \frac{f_{\text{diffuse}}(\bar{\mathbf{x}})}{\rho(\bar{\mathbf{x}})} = \frac{color~(1 - F)}{0.5} \nonumber
+\text{diffuse} &=& \frac{f_{\text{diffuse}}(\bar{\mathbf{x}})}{\rho(\bar{\mathbf{x}})} = \frac{\text{color}~(1 - F)}{0.5} \nonumber
 \end{eqnarray}
 $$
 
@@ -7133,7 +7137,7 @@ material color as $F_0$:
 Now we have a way to create a metallic appearance that exhibits the Fresnel color shift at grazing angles. Let's
 re-incorporate `specular_or_ior` into how we determine $F_0$. We know how to define a metallic $F_0$ (the
 material color) and a dielectric $F_0$. Let's interpolate between the two using `specular_or_ior` such that $0$ means
-dielectric and $1$ means metallic. You can choose any value that you like for dielectric $F_0$, though for now let's go
+dielectric and $1$ means metallic. You can choose any value that you like for dielectric $F_0$, though for now let's stick
 with the one for glass ($\eta = \frac{1}{1.5}$, $F_0 = 0.04$):
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
@@ -7176,7 +7180,7 @@ with the one for glass ($\eta = \frac{1}{1.5}$, $F_0 = 0.04$):
 
   ![Figure [metalness-img]: Interpolating between metallic and dielectric $F_0$](../images/img-49-interpolate-metallic-and-dielectric-f0.png)
 
-Now we have a clear transition between a metallic sphere on the left, dielectric sphere on the right, and one in the
+Now we have a clear transition between a metallic sphere on the left, a dielectric sphere on the right, and one in the
 middle that behaves like both.
 
 You may have noticed that the color of the "more metallic" spheres look saturated and don't quite match the tone of
@@ -7186,7 +7190,7 @@ material when `material.color` is anything other than white. So we need to tweak
 resulting color to remain consistent.
 
 Sometimes it's helpful to visualize things using a graph. The following plot shows how the specular (green),
-diffuse (orange), and total (dashed blue) reflectance vary with different values of `metallic` at normal incidence. The
+diffuse (orange), and total (dashed blue) reflectance values vary with different values of `metallic` at normal incidence. The
 material color is defined as $C = 0.5$. Notice how the total reflectance (shown as a dashed blue line) is gradually
 increasing, meaning the material gets brighter the more metallic it is:
 
@@ -7304,15 +7308,14 @@ are in-between.
 
 Here is a plot of the current version with $C = 1$:
 
-  ![Figure [darkening-reflectance-plot]: Darkening with diffuse reflectance defined as $D = C (1 - metallic) (1 - F).$](../images/fig-22-darkening-reflectance-plot.png)
+![Figure [darkening-reflectance-plot]: Darkening with diffuse reflectance defined as $D = C (1 - \text{metallic}) (1 - F).$](../images/fig-22-darkening-reflectance-plot.png)
 
 The diffuse curve falls off quadratically which explains the issue. This makes sense, since $F$
-factors in `metallic` already and multiplying by $(1 - metallic)$ squares `metallic` in the resulting polynomial.
+factors in `metallic` already and multiplying by $(1 - \text{metallic})$ squares `metallic` in the resulting polynomial.
 
-Let's see if we can come up with a formula that keeps the blue curve constant for all values of `metallic`. Let's say
-the total reflectance is defined as $T = S + D$, where $S$ is the specular and $D$ is the diffuse portion. I would like
-to keep the total albedo always equal to the material color, so I'll set $T = C$ and see if I can come up with a
-decent solution for $D$:
+Let's see if we can come up with a formula that keeps the blue curve constant for all values of `metallic`. Let's define
+the total reflectance as $T = S + D$, where $S$ is the specular and $D$ is the diffuse portion. I would like
+to keep the total albedo always equal to the material color, so I'll set $T = C$ and solve for $D$:
 
 $$
 \begin{eqnarray}
@@ -7321,21 +7324,28 @@ $$
 \end{eqnarray}
 $$
 
-Let's consider normal incidence (i.e. $cos~\theta = 1$):
+Let's consider normal incidence where $cos~\theta = 1$:
 
 $$
 \begin{eqnarray}
   D &=& C - F_0 - (1 - F_0)(1 - 1)^5 \\
   D &=& C - F_0                      \\
-  D &=& C - (F_0^{glass} + (C - F_0^{glass})metallic) \\
-  D &=& (C - F_0^{glass}) - (C - F_0^{glass})metallic \\
-  D &=& (C - F_0^{glass}) (1 - metallic) \\
+\end{eqnarray}
+$$
+
+Let's rewrite $F_0$ in terms of the material parameters. We expressed this with the WGSL statement `let f0 = mix(GLASS_F0, material.color, metallic)`, which becomes $F_0 = F_0^{\text{glass}} + (C - F_0^{\text{glass}})~\text{metallic}$:
+
+$$
+\begin{eqnarray}
+  D &=& C - [F_0^{\text{glass}} + (C - F_0^{\text{glass}})~\text{metallic}] \\
+  D &=& (C - F_0^{\text{glass}}) - (C - F_0^{\text{glass}})~\text{metallic} \\
+  D &=& (C - F_0^{\text{glass}}) (1 - \text{metallic}) \\
 \end{eqnarray}
 $$
 
 where $F_0^{glass}$ is our default $F_0$ for dielectrics. Here is a plot with this new definition of $D$:
 
-![Figure [ok-reflectance-plot]: No darkening at normal incidence with $D = (1 - metallic) (C - F_0^{glass}).$](../images/fig-23-ok-reflectance-plot.png)
+![Figure [ok-reflectance-plot]: No darkening at normal incidence with $D = (C - F_0^{glass})(1 - \text{metallic}).$](../images/fig-23-ok-reflectance-plot.png)
 
 Let's plug this in and see what happens:
 
@@ -7375,14 +7385,15 @@ Let's plug this in and see what happens:
   ![Figure [white-furnace-test-2]: White furnace test with adjusted diffuse curve, showing brightening](../images/img-54-white-furnace-test-2.png)
 
 Good news and bad news: the color looks correct towards the center of each sphere where the view direction is at
-normal incidence. Unfortunately the color gets brighter at grazing angles. Such a material is said to be
-_non energy conserving_, as the material increases the total energy in the scene.
+normal incidence. Unfortunately the color gets brighter at grazing angles. Such a material is said to not
+_conserve energy_, as the material increases the total energy in the scene.
 
-Note that we still need to include a Fresnel factor to make sure that the diffuse term goes to zero at grazing angles.
+Note that we still need to include the Fresnel factor to make sure that the diffuse term goes to zero at grazing angles.
 Ideally, we should have $D = 0$ when $cos~\theta = 0$ and get the above solution when $cos~\theta = 1$. In-between
-values should interpolate between those extremes following the same curve as the Schlick approximation. One solution
-is to use the $(1 - cos~\theta)^5$ factor. Of course, we want to invert it so that the factor evaluates to $0$ at
-grazing angles. Let's try $D = (C - F_0^{glass})(1 - metallic)(1 - (1 - cos~\theta)^5)$:
+values should interpolate between those extremes following the same curve as the Schlick approximation, which defines
+$(1 - cos~\theta)^5$ as the interpolant. So let's give that a shot.
+
+Of course, we want to invert it by subtracting it from $1$, so that the factor evaluates to $0$ at grazing angles, which results in $D = (C - F_0^{glass})(1 - \text{metallic})[1 - (1 - cos~\theta)^5]$:
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
     ...
@@ -7425,7 +7436,38 @@ This should result in the following image:
 
 This result looks correct since there seems to be no energy loss or gain. I won't prove here why this formulation
 is energy-conserving for all values of $cos~\theta$ and leave that to you as an exercise.[^ch9-footnote23] Let's
-revert the scene back to the way it was before the white furnace test and see the result:
+revert the scene back to the way it was before the white furnace test and take a look at the result:
+
+<!--
+Proof by algebra:
+
+F = F0 + (1 - F0)u5
+F0 = F0g + (C - F0g)m
+D = (C - F0g)(1 - m)(1 - u5)
+A = (C - F0g)
+
+(C - F0g)(1 - m)(1 - u5) + F0 + (1 - F0)u5 = C
+A(1 - m)(1 - u5) + Am - Amu5 - A + u5 - F0gu5 = 0
+A[(1 - m)(1 - u5) + m - mu5 - 1] + u5 - F0gu5 = 0
+A[(1 - m)(1 - u5) + m(1 - u5) - 1] + u5 - F0gu5 = 0
+-Au5 + u5 - F0gu5 = 0
+1 - A - F0g = 0
+C = 1
+
+As long as C = 1, the total reflectance will always equal C regardless of viewing angle. For C < 1, T must
+be no less than C (at normal incidence it is equal to C) and not greater than 1 (which it equals at tangent
+incidence).
+
+C <= (C - F0g)(1 - m)(1 - u5) + F0 + (1 - F0)u5 <= 1
+C <= A(1 - m)(1 - u5) + F0g + Am + (1 - F0g - Am)u5 <= 1
+C <= A(1 - m)(1 - u5) + F0g + Am + u5 - F0gu5 - Amu5 <= 1
+0 <= A(1 - m)(1 - u5) - A + Am - Amu5 + u5 - F0gu5 <= 1
+0 <= A[(1 - m)(1 - u5) + m(1 - u5) - 1] + u5 - F0gu5 <= 1
+0 <= -Au5 + u5 - F0gu5 <= 1
+0 <= u5(1 - C) <= 1
+
+It is true that 0 <= u5 <= 1. Therefore the inequality holds as long as 0 <= C <= 1, which is true.
+--!>
 
 <script type="preformatted">
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
@@ -7480,15 +7522,15 @@ revert the scene back to the way it was before the white furnace test and see th
 
   ![Figure [fixed-metallic]: Spheres with varying metalness](../images/img-56-fixed-metallic.png)
 
-All three spheres look noticeably brighter. More importantly, they have exactly the same color while their reflectance
-properties vary.
+All three spheres look noticeably brighter. More importantly, they have the same color while only their reflectance
+properties vary. The new formulation let's us control how metallic a surface appears by effectively reducing the
+influence of diffuse scattering and ensures that the color remains consistent.
 
-We now a have a good way to control how metallic a surface appears by effectively reducing the influence of diffuse
-scattering. Specifying "metallicness" in this way is common practice for PBR (i.e. physically-based) materials and
-supported by popular rendering tools like Unity, Unreal, and Blender. You could provide even more control and turn the
-specular $F_{90}$ and `GLASS_F0` into configurable `Material` parameters as well. Energy preservation isn't necessarily
-a requirement -- for instance, the popular Disney BRDF[^ch9-footnote24] is not strictly energy conserving, in order to
-allow for greater artistic freedom.
+Incorporating "metallicness" as a parameter is common practice for PBR (i.e. physically-based) materials and
+supported by popular rendering tools like Unity, Unreal Engine, and Blender. You could provide even
+more control and turn the specular $F_{90}$ and `GLASS_F0` into configurable `Material` parameters as well.
+Energy conservation isn't necessarily a requirement -- for instance, the popular Disney BRDF[^ch9-footnote24]
+is not strictly energy conserving since it prioritizes artistic freedom over correctness.
 
 Given its new meaning, it makes sense to rename `specular_or_ior` to `metallic_or_ior`:
 
@@ -7573,16 +7615,16 @@ optimization and compute it once and reuse it across all branches:
       return sqrt_f0 * sqrt_f0;
     }
 
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL delete
 
-    fn schlick_fresnel(f0: f32, cos_theta: f32) -> f32 {
-      let u = 1 - cos_theta;
-      return mix(f0, 1., u * u * u * u * u);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+    // u5 = (1 - cos_theta)^5
+    fn schlick_fresnel(f0: f32, u5: f32) -> f32 {
+      return mix(f0, 1., u5);
     }
 
-    fn schlick_fresnel_vec3(f0: vec3f, cos_theta: f32) -> vec3f {
-      let u = 1 - cos_theta;
-      return mix(f0, vec3(1.), u * u * u * u * u);
+    // u5 = (1 - cos_theta)^5
+    fn schlick_fresnel_vec3(f0: vec3f, u5: f32) -> vec3f {
+      return mix(f0, vec3(1.), u5);
     }
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
 
@@ -7606,7 +7648,7 @@ optimization and compute it once and reuse it across all branches:
         let cannot_refract = ref_ratio * ref_ratio * (1.0 - cos_theta * cos_theta) > 1.;
         let f0 = schlick_f0_from_ior(ref_ratio);
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
-        choose_specular = cannot_refract || mix(f0, 1., u5) > rand_f32();
+        choose_specular = cannot_refract || schlick_fresnel(f0, u5) > rand_f32();
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
         if choose_specular {
           attenuation = vec3(1.);
@@ -7615,9 +7657,8 @@ optimization and compute it once and reuse it across all branches:
         let metallic = material.metallic_or_ior;
         let f0 = mix(GLASS_F0, material.color, metallic);
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
-        let F = mix(f0, vec3(1.), u5);
+        let F = schlick_fresnel_vec3(f0, u5);
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
-
         choose_specular = 0.5 > rand_f32();
         if choose_specular {
           attenuation = F / 0.5;
@@ -7656,7 +7697,7 @@ $\rho_{specular}$ approaches $1$ as $D$ decreases, which can happen due to a dar
 of `metallic`, or a high Fresnel factor.
 
 We already compute $S$ and $D$ for the final `attenuation` value but we can't use these directly to compute a
-probability because they are RGB triplets. Unless we were to trace each color channel independently, we need a way to
+probability because they are RGB triplets. Since we don't trace each color channel separately, we need a way to
 convert the 3-dimensional RGB value into a scalar.
 
 Fortunately there is a formula we can use. This formula converts a (linear) RGB value to a grayscale _luminance_
@@ -7690,20 +7731,24 @@ from the specular and diffuse attenuation factors:
       let ior = abs(material.metallic_or_ior);
       let ref_ratio = select(ior, 1. / ior, is_front_face);
 
+      // The (1 - cos(theta))^5 term from the Schlick approximation.
+      let u = 1 - cos_theta;
+      let u5 = u * u * u * u * u;
+
       // Determine whether to use specular reflection.
       var choose_specular = false;
       var attenuation = material.color;
       if is_transmissive {
         let cannot_refract = ref_ratio * ref_ratio * (1.0 - cos_theta * cos_theta) > 1.;
         let f0 = schlick_f0_from_ior(ref_ratio);
-        choose_specular = cannot_refract || schlick_fresnel(f0, cos_theta) > rand_f32();
+        choose_specular = cannot_refract || schlick_fresnel(f0, u5) > rand_f32();
         if choose_specular {
           attenuation = vec3(1.);
         }
       } else if material.metallic_or_ior > 0. {
         let metallic = material.metallic_or_ior;
         let f0 = mix(vec3(GLASS_F0), material.color, metallic);
-        let F = mix(f0, vec3(1.), u5);
+        let F = schlick_fresnel_vec3(f0, u5);
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
 
@@ -7740,7 +7785,7 @@ Here is a close-up of the before and after. Both screenshots were taken after ru
 
 [^ch9-footnote22]: See Real-Time Rendering (Fourth Edition), Section 9.5 "Fresnel Reflectance"
 
-[^ch9-footnote23]: However, I did put together a handy [Desmos page](https://www.desmos.com/calculator/fqvqyydbja) where you can visualize the different formulas and play with their parameters.
+[^ch9-footnote23]: It can be proved using algebra that $C \le T \le 1$. I also put together a handy [Desmos page](https://www.desmos.com/calculator/fqvqyydbja) where you can visualize the different formulas and play with their parameters.
 
 [^ch9-footnote24]: See _Physically Based Shading at Disney_ by Brent Burley
 

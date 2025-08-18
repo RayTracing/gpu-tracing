@@ -160,6 +160,16 @@ fn schlick_f0_from_ior(ior: f32) -> f32 {
   return sqrt_f0 * sqrt_f0;
 }
 
+// u5 = (1 - cos_theta)^5
+fn schlick_fresnel(f0: f32, u5: f32) -> f32 {
+  return mix(f0, 1., u5);
+}
+
+// u5 = (1 - cos_theta)^5
+fn schlick_fresnel_vec3(f0: vec3f, u5: f32) -> vec3f {
+  return mix(f0, vec3(1.), u5);
+}
+
 fn scatter(input_ray: Ray, hit: Intersection, material: Material) -> Scatter {
   let incident = normalize(input_ray.direction);
   let incident_dot_normal = dot(incident, hit.normal);
@@ -174,7 +184,8 @@ fn scatter(input_ray: Ray, hit: Intersection, material: Material) -> Scatter {
 
   // The (1 - cos(theta))^5 term from the Schlick approximation.
   let u = 1 - cos_theta;
-  let u5 = u * u * u * u * u;
+  let u2 = u * u;
+  let u5 = u2 * u2 * u;
 
   // Determine whether to use specular reflection.
   var choose_specular = false;
@@ -182,14 +193,14 @@ fn scatter(input_ray: Ray, hit: Intersection, material: Material) -> Scatter {
   if is_transmissive {
     let cannot_refract = ref_ratio * ref_ratio * (1.0 - cos_theta * cos_theta) > 1.;
     let f0 = schlick_f0_from_ior(ref_ratio);
-    choose_specular = cannot_refract || mix(f0, 1., u5) > rand_f32();
+    choose_specular = cannot_refract || schlick_fresnel(f0, u5) > rand_f32();
     if choose_specular {
       attenuation = vec3(1.);
     }
   } else if material.metallic_or_ior > 0. {
     let metallic = material.metallic_or_ior;
     let f0 = mix(GLASS_F0, material.color, metallic);
-    let F = mix(f0, vec3(1.), u5);
+    let F = schlick_fresnel_vec3(f0, u5);
 
     let specular = F;
     let diffuse = (material.color - GLASS_F0) * (1. - metallic) * (1. - u5);
