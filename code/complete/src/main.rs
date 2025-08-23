@@ -127,8 +127,8 @@ async fn connect_to_gpu(window: &Window) -> Result<(wgpu::Device, wgpu::Queue, w
         .await
         .context("failed to connect to the GPU")?;
 
-    // Configure the texture memory backs the surface. Our renderer will draw to a surface texture
-    // every frame.
+    // Configure the texture memory backing the surface. Our renderer will draw to a surface
+    // texture every frame.
     let caps = surface.get_capabilities(&adapter);
     let format = caps
         .formats
