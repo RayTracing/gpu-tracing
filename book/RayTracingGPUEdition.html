@@ -7526,9 +7526,9 @@ All three spheres look noticeably brighter. More importantly, they have the same
 properties vary. The new formulation let's us control how metallic a surface appears by effectively reducing the
 influence of diffuse scattering and ensures that the color remains consistent.
 
-Incorporating "metallicness" as a parameter is common practice for PBR (i.e. physically-based) materials and
-supported by popular rendering tools like Unity, Unreal Engine, and Blender. You could provide even
-more control and turn the specular $F_{90}$ and `GLASS_F0` into configurable `Material` parameters as well.
+Incorporating "metallicness" as a configurable parameter is common practice for PBR (i.e. physically-based)
+materials and supported by popular rendering tools like Unity, Unreal Engine, and Blender. You could provide
+even more control and turn the specular $F_{90}$ and $F_0$ into configurable `Material` parameters as well.
 Energy conservation isn't necessarily a requirement -- for instance, the popular Disney BRDF[^ch9-footnote24]
 is not strictly energy conserving since it prioritizes artistic freedom over correctness.
 
@@ -7791,8 +7791,60 @@ Here is a close-up of the before and after. Both screenshots were taken after ru
 
 [^ch9-footnote25]: This normalized form of luminance (where $1$ is the "perfect white") is called _relative luminance_. This specific formula comes from the ITU-R BT.709 standard used for color displays. The $Y$ refers to the first component in the $YC_BC_R$ color space which encodes video as the combination of "perceived brightness", "redness", and "blueness". This is closely related to the $YUV$ format used in analog television broadcast which is itself derived from the original CIE XYZ color space published in 1931. The history of color science and how color exchange formats evolved over the development of television and computer displays is quite fascinating.
 
+Next Steps
+----------
+Our material system can combine multiple scattering types to express a mixture of metallic and dielectric surfaces.
+This type of representation is highly common; in fact nearly all physically-based shading models that I'm familiar with
+use a combination of diffuse and specular reflectance to emulate a variety of surface materials.
+
+We won't go beyond Lambertian diffuse and perfectly specular scattering in this book, however you can make your materials
+a lot more expressive with some tweaks.
+
+As a next step, think about implementing adding a _roughness_ parameter to the `Material` struct. Perfectly specular reflection
+and refraction give the appearance of a perfectly smooth surface but most objects are rough and don't act like perfect mirrors
+(think of brushed metal or frosted glass). A simple implementation would slightly perturb the shading normal vector (stored in
+the variable `N`) towards a random direction based on the material _roughness_ and use that to compute specular reflection.
+You can refer to [_Ray Tracing In One Weekend, 10.6. Fuzzy Reflection_](https://raytracing.github.io/books/RayTracingInOneWeekend.html#metal/fuzzyreflection), which defines this as "fuzz" and perturbs the specular reflection vector instead of the normal.
+
+An even better approach is to implement a _Microfacet_ BRDF. Microfacet theory defines a surface as consisting of numerous
+surface patches with different orientations. These "microfacets" act like many tiny mirrors and the theory models their
+collective reflectance as a statistical distribution that can be sampled like a BRDF.
+
+If you find this topic as fascinating as I am, here is a list of books and articles that that I highly recommend:
+
+* _Real-Time Rendering (Fourth Edition)_ by Tomas Akenine-Möller et al. Chapter 9 is a comprehensive and
+  practical introduction to Physically Based Shading.
+
+* _Crash Course in BRDF Implementation_ by Jakub Boksansky is an excellent introduction to BRDFs that covers
+  the fundamentals and provides many references to the literature ([link](https://boksajak.github.io/blog/BRDF)).
+
+* The [course notes](https://blog.selfshadow.com/publications/s2013-shading-course/hoffman/s2013_pbs_physics_math_notes.pdf)
+  from the 2013 SIGGRAPH course _Physics and Math of Shading_ by Naty Hoffman.
+
+* _Physically Based Shading at Disney_ by Brent Burley is a fundamental study of diffuse and specular reflectance based on
+  empirical observations. It describes the set of material parameters used at Disney (commonly known as the _Disney BRDF_)
+  and provides many visuals.
+
+* _Physically Based Rendering: From Theory To Implementation (Fourth Edition)_ by Matt Pharr et al. I recommend
+  taking a look at the chapters on Reflection Models, materials, and Light Transport.
+
+This is by no means an exhaustive list but I hope it can provide some inspiration. We have really only scratched the
+surface (no pun intended).
+
+<br/>
+
+-----
+
+<br/>
+
+If you have come this far, congratulations! You have built a basic path tracer entirely in a shader program. Next, we're
+going to extend our renderer to support different geometries and look at ways to improve its performance and sampling
+efficiency.
 
 <!--
+Blender Principled BSDF: https://docs.blender.org/manual/en/latest/render/shader_nodes/shader/principled.html
+https://media.disneyanimation.com/uploads/production/publication_asset/48/asset/s2012_pbs_disney_brdf_notes_v3.pdf
+https://dl.acm.org/doi/pdf/10.1145/344779.344814
 -->
 
                                (insert acknowledgments.md.html here)

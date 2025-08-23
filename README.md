@@ -14,30 +14,6 @@ I hope that, by completing this book, you will have built a renderer that serves
 for future learning and experimentation. It won't be the most-efficient renderer but it will be able
 to draw the scenes from _Ray Tracing In One Weekend_ at near-interactive rates.
 
-Project Status
---------------
-This book is a work in progress. The following is the list of chapters planned for the first
-installment, including each chapter's status.
-
-| Chapter | Status |
-| ------- | ------ |
-| Introduction | ✍🏻 |
-| Windowing and GPU Setup | ✍🏻 |
-| Drawing Pixels | ✍🏻 |
-| Resource Bindings | ✍🏻 |
-| Ray Casting | ✍🏻 |
-| Temporal Accumulation | ✍🏻 |
-| Path Tracing | ✍🏻 |
-| Interactive Camera | ✍🏻 |
-| Materials | 📝 |
-| Scene Builder | 📝 |
-| Transforms and Instancing | |
-| Top Level BVH | |
-| Triangle Mesh | |
-| Sampling the Sun | |
-| Performance | |
-
-📝 = Work in progress  ✍🏻 = Draft
 
 Source Code
 -----------
