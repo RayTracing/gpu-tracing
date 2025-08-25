@@ -258,19 +258,19 @@ var<private> materials: Materials = Materials(
   Material(/*color*/ vec3(0.7, 0.9, 0.2), /*metallic_or_ior*/0.),
   Material(/*color*/ vec3(1.), /*metallic_or_ior*/-1.5),
 
-  Material(/*color*/ vec3(1., 0.5, 0.), /*metallic_or_ior*/0.9),
-  Material(/*color*/ vec3(1., 0.5, 0.), /*metallic_or_ior*/0.5),
-  Material(/*color*/ vec3(1., 0.5, 0.), /*metallic_or_ior*/0.1),
+  Material(/*color*/ vec3(0.3, 0.6, 0.9), /*metallic_or_ior*/0.9),
+  Material(/*color*/ vec3(0.3, 0.9, 0.7), /*metallic_or_ior*/0.3),
+  Material(/*color*/ vec3(0.9, 0.3, 0.7), /*metallic_or_ior*/0.001),
 );
 
 var<private> scene: Scene = Scene(
-  Sphere(/*center*/ vec3(-1.1, 0.5, 0.), /*radius*/ 0.5, /*material_index*/ 0),
-  Sphere(/*center*/ vec3(0., 0.5, 0.),   /*radius*/ 0.5, /*material_index*/ 1),
-  Sphere(/*center*/ vec3(1.1, 0.5, 0.),  /*radius*/ 0.5, /*material_index*/ 3),
+  Sphere(/*center*/ vec3(0, 0.5, 1.6), /*radius*/ 0.5, /*material_index*/ 3),
+  Sphere(/*center*/ vec3(-1.522, 0.5, 0.494),   /*radius*/ 0.5, /*material_index*/ 1),
+  Sphere(/*center*/ vec3(0., 0.7, 0.),  /*radius*/ 0.7, /*material_index*/ 0),
 
-  Sphere(/*center*/ vec3(-1.1, 0.5, -2.), /*radius*/ 0.5, /*material_index*/ 4),
-  Sphere(/*center*/ vec3(0., 0.5, -2.),   /*radius*/ 0.5, /*material_index*/ 5),
-  Sphere(/*center*/ vec3(1.1, 0.5, -2.),  /*radius*/ 0.5, /*material_index*/ 6),
+  Sphere(/*center*/ vec3(-0.941, 0.5, -1.294), /*radius*/ 0.5, /*material_index*/ 4),
+  Sphere(/*center*/ vec3(0.941, 0.5, -1.294),   /*radius*/ 0.5, /*material_index*/ 5),
+  Sphere(/*center*/ vec3(1.522, 0.5, 0.494),  /*radius*/ 0.5, /*material_index*/ 6),
 
   // Ground
   Sphere(/*center*/ vec3(0., -2e2 - EPSILON, 0.), /*radius*/ 2e2, /*material_index*/ 2),
@@ -298,14 +298,17 @@ var<private> vertices: TriangleVertices = TriangleVertices(
 
   let origin = uniforms.camera.origin;
   let focus_distance = 1.;
+  let fovy = radians(30.);
   let aspect_ratio = f32(uniforms.width) / f32(uniforms.height);
+  let viewport_height = 2. * tan(fovy * 0.5) * focus_distance;
+  let viewport_width = viewport_height * aspect_ratio;
 
   // Offset and normalize the viewport coordinates of the ray.
   let offset = vec2(rand_f32() - 0.5, rand_f32() - 0.5);
   var uv = (pos.xy + offset) / vec2f(f32(uniforms.width - 1u), f32(uniforms.height - 1u));
 
-  // Map `uv` from y-down (normalized) viewport coordinates to camera coordinates.
-  uv = (2. * uv - vec2(1.)) * vec2(aspect_ratio, -1.);
+  // Map `uv` from y-down normalized coordinates to scaled NDC viewport.
+  uv = (uv - vec2(0.5)) * vec2(viewport_width, -viewport_height);
 
   // Compute the scene-space ray direction by rotating the camera-space vector into a new
   // basis.

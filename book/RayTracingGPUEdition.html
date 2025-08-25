@@ -1690,7 +1690,7 @@ system.[^ch5-footnote1]
 In order to determine the direction for the ray targeting a pixel, we need to convert the
 pixel's viewport coordinates to the coordinate system we are going to use when computing ray
 intersections. Let's define the $x$ and $y$ coordinate span of the viewport to be the same as NDC
-(see _Figure 4_). This would make the viewport a square (with a width and height of $2$) so we need
+(see Figure [ndc]). This would make the viewport a square (with a width and height of $2$) so we need
 to adjust it by the aspect ratio of the application window in order to make its shape match the
 window frame.
 
@@ -7796,6 +7796,8 @@ Here is a close-up of the before and after. Both screenshots were taken after ru
 
   ![Before, $\rho_{specular} = 0.5$](../images/img-52-metallic-noisy.png height=350px) ![After, $\rho_{specular} = \frac{S}{S + D}$](../images/img-51-metallic-not-noisy.png height=350px)
 
+That's a significant improvement. We have effectively reduced the number of samples required to resolve
+the image with a simple change to our sampling strategy.
 
 [^ch9-footnote22]: See Real-Time Rendering (Fourth Edition), Section 9.5 "Fresnel Reflectance"
 
@@ -7850,6 +7852,231 @@ Blender Principled BSDF: https://docs.blender.org/manual/en/latest/render/shader
 https://media.disneyanimation.com/uploads/production/publication_asset/48/asset/s2012_pbs_disney_brdf_notes_v3.pdf
 https://dl.acm.org/doi/pdf/10.1145/344779.344814
 -->
+
+Field of View
+=============
+Let's rearrange the scene to show off our new materials. I'll position 5 spheres in a circle around a bigger one
+and reposition the camera so that they are all in view:
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    ...
+    const OBJECT_COUNT: u32 = 7;
+    alias Scene = array<Sphere, OBJECT_COUNT>;
+    alias Materials = array<Material, OBJECT_COUNT>;
+
+    var<private> materials: Materials = Materials(
+      Material(/*color*/ vec3(0.7, 0.5, 0.5), /*metallic_or_ior*/1.),
+      Material(/*color*/ vec3(0.5, 0.5, 0.9), /*metallic_or_ior*/0.),
+      Material(/*color*/ vec3(0.7, 0.9, 0.2), /*metallic_or_ior*/0.),
+      Material(/*color*/ vec3(1.), /*metallic_or_ior*/-1.5),
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+      Material(/*color*/ vec3(0.3, 0.6, 0.9), /*metallic_or_ior*/0.9),
+      Material(/*color*/ vec3(0.3, 0.9, 0.7), /*metallic_or_ior*/0.3),
+      Material(/*color*/ vec3(0.9, 0.3, 0.7), /*metallic_or_ior*/0.001),
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    );
+
+    var<private> scene: Scene = Scene(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+      Sphere(/*center*/ vec3(0, 0.5, 1.6), /*radius*/ 0.5, /*material_index*/ 3),
+      Sphere(/*center*/ vec3(-1.522, 0.5, 0.494),   /*radius*/ 0.5, /*material_index*/ 1),
+      Sphere(/*center*/ vec3(0., 0.7, 0.),  /*radius*/ 0.7, /*material_index*/ 0),
+
+      Sphere(/*center*/ vec3(-0.941, 0.5, -1.294), /*radius*/ 0.5, /*material_index*/ 4),
+      Sphere(/*center*/ vec3(0.941, 0.5, -1.294),   /*radius*/ 0.5, /*material_index*/ 5),
+      Sphere(/*center*/ vec3(1.522, 0.5, 0.494),  /*radius*/ 0.5, /*material_index*/ 6),
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+
+      // Ground
+      Sphere(/*center*/ vec3(0., -2e2 - EPSILON, 0.), /*radius*/ 2e2, /*material_index*/ 2),
+    );
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [rearrange-scene-spheres-around-mirror-ball]: <kbd>[shaders.wgsl]</kbd>]
+</script>
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+    async fn main() -> Result<()> {
+        ...
+        let (device, queue, surface) = connect_to_gpu(&window).await?;
+        let mut renderer = render::PathTracer::new(device, queue, WIDTH, HEIGHT);
+        let mut camera = Camera::look_at(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+            Vec3::new(0.3040843, 2.5462134, 0.41705906),
+            Vec3::new(0., 0., 0.),
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+            Vec3::new(0., 1., 0.),
+        );
+        ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [reposition-camera-for-spheres-around-mirror-ball]: <kbd>[main.rs]</kbd>]
+</script>
+
+This should result in the following image:
+
+  ![Figure [turtle-scene]: Spheres from above](../images/img-57-turtle-scene-from-above.png)
+
+You may have noticed that the 5 smaller spheres surrounding the bigger one look slightly stretched
+and egg-shaped. This distortion is more pronounced the closer the object is to the edges of the
+frame. Here is the same scene from a different angle that increases the effect on the two closer
+spheres:
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+    async fn main() -> Result<()> {
+        ...
+        let (device, queue, surface) = connect_to_gpu(&window).await?;
+        let mut renderer = render::PathTracer::new(device, queue, WIDTH, HEIGHT);
+        let mut camera = Camera::look_at(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+            Vec3::new(1.0655028, 1.8651317, 1.4613647),
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+            Vec3::new(0., 0., 0.),
+            Vec3::new(0., 1., 0.),
+        );
+        ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [reposition-camera-for-spheres-around-mirror-ball-2]: <kbd>[main.rs]</kbd>]
+</script>
+
+  ![Figure [turtle-scene-angled]: Perspective distortion](../images/img-58-turtle-scene-from-above-2.png)
+
+The pinhole camera model projects all visible points in the scene onto a single point along the camera rays
+(see Figure [camera-view-space]). When the angle between a camera ray and the look vector (i.e. the vector
+towards the center of the viewport) is large, the objects projected onto the image plane look more distorted.
+The wider the angle, the bigger the distortion.
+
+The extent of a camera's visible range is called its _field of view_ (or _FOV_ for short). The FOV is measured
+in angles, so a camera with a visible range that spans the full range of directions side-to-side would have a
+FOV of 180 degrees. The widest angle between a camera a ray and the look vector in such a scenario would be
+90 degrees.
+
+  ![Figure [vertical-fov]: Vertical field of view at 90 degrees and 45 degrees with the same aspect ratio and focus distance](../images/fig-21-fov.svg)
+
+A wide FOV conveys a sense of depth especially when objects are close to the camera. A narrow FOV will minimize
+the distortion due to perspective but requires the camera to be positioned at a distance to keep more of the
+scene in view. The angle is typically defined as either _horizontal_, _vertical_, or sometimes _diagonal_
+relative to the image plane.
+
+Our renderer currently doesn't have a notion of FOV. Remember that we defined the height of the viewport as $2$
+-- with a vertical extent ranging from $-1$ to $1$ -- and computed the width of the viewport based on the provided
+aspect ratio. We also set the distance between the camera origin and the viewport to $1$.
+
+Now, consider a vertical plane that is parallel to the look vector and intersects the camera origin
+and the viewport. The plane intersects the viewport at two points in the center and the top edge. These two
+points and the camera origin form an upright isosceles triangle with two 45 degree angles. The triangle spans
+only half of the vertical FOV, so the renderer's full vertical FOV is 90 degrees.
+
+  ![Figure [vertical-fov-2d]: Our renderer currently has a FOV 90 degrees and a viewport height of 2](../images/fig-22-fov-90-deg-triangle.svg)
+
+Since we compute our camera rays based on points on the viewport, changing the height of the viewport will
+also change the vertical field of view. If we want to achieve a specific FOV angle $\theta$ given focal
+distance $d$, we can compute the viewport height $h$ with some basic trigonometry:
+
+$$
+\begin{eqnarray}
+  tan~\frac{\theta}{2} &=& \frac{h}{2d} \nonumber \\
+                     h &=& 2d~tan~\frac{\theta}{2} \nonumber
+\end{eqnarray}
+$$
+
+Let's turn this into code. We'll compute the viewport height using this formula and compute the viewport height
+using the aspect ratio. Then we'll simply change our UV mapping to use the new dimensions instead of assuming that
+width and height both equal 2. For now let's hardcode 90 degrees as the vertical FOV and verify that we get the
+same result:
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    ...
+    @fragment fn display_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+      init_rng(vec2u(pos.xy));
+
+      let origin = uniforms.camera.origin;
+      let focus_distance = 1.;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+      let fovy = radians(90.);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+      let aspect_ratio = f32(uniforms.width) / f32(uniforms.height);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+      let viewport_height = 2. * tan(fovy * 0.5) * focus_distance;
+      let viewport_width = viewport_height * aspect_ratio;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+
+      // Offset and normalize the viewport coordinates of the ray.
+      let offset = vec2(rand_f32() - 0.5, rand_f32() - 0.5);
+      var uv = (pos.xy + offset) / vec2f(f32(uniforms.width - 1u), f32(uniforms.height - 1u));
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL delete
+      // Map `uv` from y-down (normalized) viewport coordinates to camera coordinates.
+      uv = (2. * uv - vec2(1.)) * vec2(aspect_ratio, -1.);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+      // Map `uv` from y-down normalized coordinates to scaled NDC viewport.
+      uv = (uv - vec2(0.5)) * vec2(viewport_width, -viewport_height);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+
+      // Compute the scene-space ray direction by rotating the camera-space vector into a new
+      // basis.
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [hardcoded-fov]: <kbd>[shaders.wgsl]</kbd>]
+</script>
+
+This should result in the same image as Figure [turtle-scene-angled]. `fovy` is short for "FOV along
+the y-axis" and represents the vertical field of view angle. Let's change it to 30 degrees:
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    ...
+    @fragment fn display_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+      init_rng(vec2u(pos.xy));
+
+      let origin = uniforms.camera.origin;
+      let focus_distance = 1.;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+      let fovy = radians(30.);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+      let aspect_ratio = f32(uniforms.width) / f32(uniforms.height);
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [hardcoded-fov]: <kbd>[shaders.wgsl]</kbd>]
+</script>
+
+  ![Figure [vertical-fov-30-deg]: Vertical FOV set to 30 degrees](../images/img-59-fov-30-deg.png)
+
+Since the viewport spans a narrower view it also fits less of the scene from the same camera position.
+Let's move the camera back a little:
+
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+    async fn main() -> Result<()> {
+        ...
+        let (device, queue, surface) = connect_to_gpu(&window).await?;
+        let mut renderer = render::PathTracer::new(device, queue, WIDTH, HEIGHT);
+        let mut camera = Camera::look_at(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+            Vec3::new(2.8577466, 5.002403, 3.9194741),
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+            Vec3::new(0., 0., 0.),
+            Vec3::new(0., 1., 0.),
+        );
+        ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [reposition-camera-for-narrower-fov]: <kbd>[main.rs]</kbd>]
+</script>
+
+  ![Figure [vertical-fov-30-deg-zoomed-out]: 30 degrees vertical FOV zoomed out](../images/img-60-fov-30-deg-zoomed-out.png)
+
+Now all spheres are in view and they no longer look distorted. Try plugging in different angles between
+0 degrees and 180 degrees and see how these affect the rendering.
+
 
                                (insert acknowledgments.md.html here)
 
