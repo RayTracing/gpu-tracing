@@ -94,6 +94,7 @@ impl PathTracer {
             label: Some("display pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view: target,
+                depth_slice: None,
                 resolve_target: None,
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
@@ -186,12 +187,14 @@ fn create_display_pipeline(
         },
         vertex: wgpu::VertexState {
             module: shader_module,
-            entry_point: "display_vs",
+            entry_point: Some("display_vs"),
+            compilation_options: Default::default(),
             buffers: &[],
         },
         fragment: Some(wgpu::FragmentState {
             module: shader_module,
-            entry_point: "display_fs",
+            entry_point: Some("display_fs"),
+            compilation_options: Default::default(),
             targets: &[Some(wgpu::ColorTargetState {
                 format: wgpu::TextureFormat::Bgra8Unorm,
                 blend: None,
@@ -201,6 +204,7 @@ fn create_display_pipeline(
         depth_stencil: None,
         multisample: wgpu::MultisampleState::default(),
         multiview: None,
+        cache: None,
     });
     (pipeline, bind_group_layout)
 }

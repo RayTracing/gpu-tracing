@@ -123,7 +123,7 @@ async fn connect_to_gpu(window: &Window) -> Result<(wgpu::Device, wgpu::Queue, w
     // resources like buffers, textures, and pipelines. "queue" represents the command queue that
     // we use to submit commands to the GPU.
     let (device, queue) = adapter
-        .request_device(&wgpu::DeviceDescriptor::default(), None)
+        .request_device(&wgpu::DeviceDescriptor::default())
         .await
         .context("failed to connect to the GPU")?;
 

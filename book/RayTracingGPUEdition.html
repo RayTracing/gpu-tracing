@@ -271,7 +271,7 @@ surface manages a set of *textures* that allow the GPU to render inside the wind
         // resources like buffers, textures, and pipelines. "queue" represents the command queue that
         // we use to submit commands to the GPU.
         let (device, queue) = adapter
-            .request_device(&wgpu::DeviceDescriptor::default(), None)
+            .request_device(&wgpu::DeviceDescriptor::default())
             .await
             .context("failed to connect to the GPU")?;
 
@@ -856,12 +856,12 @@ program. Let's add a new function called `create_display_pipeline`:
             },
             vertex: wgpu::VertexState {
                 module: shader_module,
-                entry_point: "display_vs",
+                entry_point: Some("display_vs"),
                 buffers: &[],
             },
             fragment: Some(wgpu::FragmentState {
                 module: shader_module,
-                entry_point: "display_fs",
+                entry_point: Some("display_fs"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: wgpu::TextureFormat::Bgra8Unorm,
                     blend: None,
@@ -871,6 +871,7 @@ program. Let's add a new function called `create_display_pipeline`:
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
             multiview: None,
+            cache: None,
         })
     }
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -973,6 +974,7 @@ created earlier:
                 label: Some("display pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: target,
+                    depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
@@ -3117,6 +3119,7 @@ the two bind groups we created, using even and odd values of `frame_count` as a 
                 label: Some("display pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: target,
+                    depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
@@ -7534,6 +7537,7 @@ is not strictly energy conserving since it prioritizes artistic freedom over cor
 
 Given its new meaning, it makes sense to rename `specular_or_ior` to `metallic_or_ior`:
 
+<script type="preformatted">
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
     ...
     fn scatter(input_ray: Ray, hit: Intersection, material: Material) -> Scatter {
@@ -7604,10 +7608,12 @@ Given its new meaning, it makes sense to rename `specular_or_ior` to `metallic_o
     ...
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     [Listing [rename-metallic-or-ior]: <kbd>[shaders.wgsl]</kbd>]
+</script>
 
 One more thing: you may have noticed that we now compute the $(1 - cos~\theta)^5$ term twice. We can make a small
 optimization and compute it once and reuse it across all branches:
 
+<script type="preformatted">
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
     ...
     fn schlick_f0_from_ior(ior: f32) -> f32 {
@@ -7675,6 +7681,7 @@ optimization and compute it once and reuse it across all branches:
     ...
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     [Listing [optimize-schlick]: <kbd>[shaders.wgsl]</kbd>]
+</script>
 
 
 ### A Better Sampling PDF
@@ -7830,16 +7837,6 @@ Here is a list of books and articles that that I highly recommend if you want to
 
 This is by no means an exhaustive list but I hope it can provide some inspiration. We have really only scratched the
 surface (no pun intended).
-
-<br/>
-
------
-
-<br/>
-
-If you have come this far, congratulations! You have built a basic path tracer entirely in a shader program. Next, we're
-going to extend our renderer to support different geometries and look at ways to improve its performance and sampling
-efficiency.
 
 <!--
 Blender Principled BSDF: https://docs.blender.org/manual/en/latest/render/shader_nodes/shader/principled.html
