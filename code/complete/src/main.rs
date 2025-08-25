@@ -60,6 +60,16 @@ async fn main() -> Result<()> {
                     frame.present();
                     window.request_redraw();
                 }
+                WindowEvent::MouseInput { device_id: _, state, button } => {
+                    use winit::event::MouseButton;
+
+                    let pressed = state == ElementState::Pressed;
+                    match button {
+                        MouseButton::Left => left_mouse_button_pressed = pressed,
+                        MouseButton::Right => right_mouse_button_pressed = pressed,
+                        _ => (),
+                    }
+                }
                 _ => (),
             },
             Event::DeviceEvent { event, .. } => match event {
@@ -81,14 +91,6 @@ async fn main() -> Result<()> {
                     if right_mouse_button_pressed {
                         camera.pan(dx, dy);
                         renderer.reset_samples();
-                    }
-                }
-                DeviceEvent::Button { button, state } => {
-                    let pressed = state == ElementState::Pressed;
-                    match button {
-                        0 => left_mouse_button_pressed = pressed,
-                        1 => right_mouse_button_pressed = pressed,
-                        _ => (),
                     }
                 }
                 _ => (),

@@ -4884,8 +4884,8 @@ Note that the application will receive the `DeviceEvent::MouseMotion` even witho
 Unless we explicitly control when the camera should and should not move, all mouse movement will
 result in camera movement and reset the radiance samples. Bumping into the mouse while waiting for
 a slow render to resolve can be annoying, so let's prevent accidents and require that the user hold
-down a mouse button during movement. We can use the `DeviceEvent::Button` event to detect when a
-mouse button gets pressed and released.
+down a mouse button during movement. We can use the `WindowEvent::MouseInput` event to detect when a
+mouse button gets pressed and released inside the surface:
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
     async fn main() -> Result<()> {
@@ -4899,6 +4899,13 @@ mouse button gets pressed and released.
             match event {
                 Event::WindowEvent { event, .. } => match event {
                     ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+                    WindowEvent::MouseInput { device_id: _, state, button } => {
+                        // NOTE: If multiple mouse buttons are pressed, releasing any of them will
+                        // set this to false.
+                        mouse_button_pressed = state == ElementState::Pressed;
+                    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
                 },
                 Event::DeviceEvent { event, .. } => match event {
                     DeviceEvent::MouseWheel { delta } => {
@@ -4915,11 +4922,6 @@ mouse button gets pressed and released.
                             camera.pan(dx as f32 * 0.01, dy as f32 * -0.01);
                             renderer.reset_samples();
                         }
-                    }
-                    DeviceEvent::Button { state, .. } => {
-                        // NOTE: If multiple mouse buttons are pressed, releasing any of them will
-                        // set this to false.
-                        mouse_button_pressed = state == ElementState::Pressed;
                     }
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
                     _ => (),
@@ -5147,7 +5149,7 @@ helper called `Camera::calculate_uniforms`:
 
 We will use mouse movement to control the altitude and azimuth angles. We are already routing
 `DeviceEvent::MouseMotion` events to `Camera::pan` but we could reserve _left-click_ drag for
-orbital movement and _right-click_ drag for pan. The `DeviceEvent::Button` event has a `button`
+orbital movement and _right-click_ drag for pan. The `WindowEvent::MouseInput` event has a `button`
 field that can be used to identify the mouse button that was pressed or released:
 
 <script type="preformatted">
@@ -5164,6 +5166,21 @@ field that can be used to identify the mouse button that was pressed or released
             control_handle.set_control_flow(ControlFlow::Poll);
             match event {
                 ...
+                Event::WindowEvent { event, .. } => match event {
+                    ...
+                    WindowEvent::MouseInput { device_id: _, state, button } => {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+                        use winit::event::MouseButton;
+
+                        let pressed = state == ElementState::Pressed;
+                        match button {
+                            MouseButton::Left => left_mouse_button_pressed = pressed,
+                            MouseButton::Right => right_mouse_button_pressed = pressed,
+                            _ => (),
+                        }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+                    }
+                },
                 Event::DeviceEvent { event, .. } => match event {
                     DeviceEvent::MouseWheel { delta } => {
                         let delta = match delta {
@@ -5184,16 +5201,6 @@ field that can be used to identify the mouse button that was pressed or released
                         if right_mouse_button_pressed {
                             camera.pan(dx, dy);
                             renderer.reset_samples();
-                        }
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
-                    }
-                    DeviceEvent::Button { button, state } => {
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
-                        let pressed = state == ElementState::Pressed;
-                        match button {
-                            0 => left_mouse_button_pressed = pressed,
-                            1 => right_mouse_button_pressed = pressed,
-                            _ => (),
                         }
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
                     }
