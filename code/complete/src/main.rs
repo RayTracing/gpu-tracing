@@ -35,7 +35,8 @@ async fn main() -> Result<()> {
         Vec3::new(2.8577466, 5.002403, 3.9194741),
         Vec3::new(0., 0., 0.),
         Vec3::new(0., 1., 0.),
-    );
+    )
+    .with_fov(30_f32.to_radians());
 
     let mut left_mouse_button_pressed = false;
     let mut right_mouse_button_pressed = false;
@@ -45,6 +46,42 @@ async fn main() -> Result<()> {
         match event {
             Event::WindowEvent { event, .. } => match event {
                 WindowEvent::CloseRequested => control_handle.exit(),
+                WindowEvent::KeyboardInput {
+                    device_id: _,
+                    event,
+                    ..
+                } => {
+                    use winit::keyboard::{KeyCode, PhysicalKey};
+
+                    if event.state != ElementState::Pressed {
+                        return;
+                    }
+                    match event.physical_key {
+                        PhysicalKey::Code(KeyCode::ArrowUp) => {
+                            camera.adjust_fov(1_f32.to_radians());
+                            renderer.reset_samples();
+                        }
+                        PhysicalKey::Code(KeyCode::ArrowDown) => {
+                            camera.adjust_fov(-1_f32.to_radians());
+                            renderer.reset_samples();
+                        }
+                        _ => (),
+                    }
+                }
+                WindowEvent::MouseInput {
+                    device_id: _,
+                    state,
+                    button,
+                } => {
+                    use winit::event::MouseButton;
+
+                    let pressed = state == ElementState::Pressed;
+                    match button {
+                        MouseButton::Left => left_mouse_button_pressed = pressed,
+                        MouseButton::Right => right_mouse_button_pressed = pressed,
+                        _ => (),
+                    }
+                }
                 WindowEvent::RedrawRequested => {
                     // Wait for the next available frame buffer.
                     let frame: wgpu::SurfaceTexture = surface
@@ -59,16 +96,6 @@ async fn main() -> Result<()> {
 
                     frame.present();
                     window.request_redraw();
-                }
-                WindowEvent::MouseInput { device_id: _, state, button } => {
-                    use winit::event::MouseButton;
-
-                    let pressed = state == ElementState::Pressed;
-                    match button {
-                        MouseButton::Left => left_mouse_button_pressed = pressed,
-                        MouseButton::Right => right_mouse_button_pressed = pressed,
-                        _ => (),
-                    }
                 }
                 _ => (),
             },

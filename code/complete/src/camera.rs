@@ -8,11 +8,15 @@ use {
 
 use crate::algebra::Vec3;
 
+const DEFAULT_FOV_Y: f32 = 45_f32.to_radians();
+const MIN_FOV_Y: f32 = 10_f32.to_radians();
+const MAX_FOV_Y: f32 = 170_f32.to_radians();
+
 #[derive(Debug, Copy, Clone, Pod, Zeroable)]
 #[repr(C)]
 pub struct CameraUniforms {
     origin: Vec3,
-    _pad0: u32,
+    fov_y: f32,
     u: Vec3,
     _pad1: u32,
     v: Vec3,
@@ -37,10 +41,10 @@ impl Camera {
         let neg_w = center_to_origin.normalized();
         let azimuth = neg_w.x().atan2(neg_w.z());
         let altitude = neg_w.y().asin();
-        Self::with_spherical_coords(center, up, distance, azimuth, altitude)
+        Self::from_spherical_coords(center, up, distance, azimuth, altitude)
     }
 
-    pub fn with_spherical_coords(
+    pub fn from_spherical_coords(
         center: Vec3,
         up: Vec3,
         distance: f32,
@@ -55,8 +59,14 @@ impl Camera {
             azimuth,
             altitude,
         };
+        camera.uniforms.fov_y = DEFAULT_FOV_Y;
         camera.calculate_uniforms();
         camera
+    }
+
+    pub fn with_fov(mut self, fov_y: f32) -> Self {
+        self.uniforms.fov_y = fov_y;
+        self
     }
 
     pub fn uniforms(&self) -> &CameraUniforms {
@@ -64,7 +74,7 @@ impl Camera {
     }
 
     pub fn zoom(&mut self, displacement: f32) {
-        self.distance = (self.distance - displacement).max(0.0);  // Prevent negative distance
+        self.distance = (self.distance - displacement).max(0.0); // Prevent negative distance
         self.uniforms.origin = self.center - self.distance * self.uniforms.w;
     }
 
@@ -80,6 +90,11 @@ impl Camera {
         self.azimuth += du;
         self.azimuth %= 2. * PI;
         self.calculate_uniforms();
+    }
+
+    pub fn adjust_fov(&mut self, delta: f32) {
+        let fov_y = self.uniforms.fov_y;
+        self.uniforms.fov_y = (fov_y + delta).clamp(MIN_FOV_Y, MAX_FOV_Y);
     }
 
     fn calculate_uniforms(&mut self) {

@@ -18,9 +18,13 @@ struct Uniforms {
 
 struct CameraUniforms {
   origin: vec3f,
+  fov_y: f32,
   u: vec3f,
+  focus_distance: f32,
   v: vec3f,
   w: vec3f,
+  //viewport_width: f32,
+  //viewport_height: f32,
 }
 
 struct Rng {
@@ -298,9 +302,9 @@ var<private> vertices: TriangleVertices = TriangleVertices(
 
   let origin = uniforms.camera.origin;
   let focus_distance = 1.;
-  let fovy = radians(30.);
   let aspect_ratio = f32(uniforms.width) / f32(uniforms.height);
-  let viewport_height = 2. * tan(fovy * 0.5) * focus_distance;
+  let fov_y = uniforms.camera.fov_y;
+  let viewport_height = 2. * tan(fov_y * 0.5) * focus_distance;
   let viewport_width = viewport_height * aspect_ratio;
 
   // Offset and normalize the viewport coordinates of the ray.

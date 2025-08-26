@@ -4463,6 +4463,7 @@ $\vec{\textbf{w}}$.
 
       let origin = uniforms.camera.origin;
       let focus_distance = 1.;
+      let aspect_ratio = f32(uniforms.width) / f32(uniforms.height);
 
       // Offset and normalize the viewport coordinates of the ray.
       let offset = vec2(rand_f32() - 0.5, rand_f32() - 0.5);
@@ -5029,7 +5030,7 @@ the camera:
   ![Figure [four-spheres-orbit]: Four spheres for reference](../images/img-27-four-spheres.png)
 
 For now, we are going to do away with `Camera::look_at` and introduce a new constructor called
-`Camera::with_spherical_coords`. This will compute the camera uniforms (i.e. the basis vectors and
+`Camera::from_spherical_coords`. This will compute the camera uniforms (i.e. the basis vectors and
 the origin) from the new parameters. Since we are going to need to re-compute
 the camera uniforms whenever the spherical coordinates change, let's factor out that logic in a
 helper called `Camera::calculate_uniforms`:
@@ -5069,7 +5070,7 @@ helper called `Camera::calculate_uniforms`:
             }
         }
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
-        pub fn with_spherical_coords(
+        pub fn from_spherical_coords(
             center: Vec3,
             up: Vec3,
             distance: f32,
@@ -5123,7 +5124,7 @@ helper called `Camera::calculate_uniforms`:
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
     }
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    [Listing [camera-basis-vectors-cpu]: <kbd>[camera.rs]</kbd> `Camera::with_spherical_coords`]
+    [Listing [camera-basis-vectors-cpu]: <kbd>[camera.rs]</kbd> `Camera::from_spherical_coords`]
 
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
@@ -5133,7 +5134,7 @@ helper called `Camera::calculate_uniforms`:
         let (device, queue, surface) = connect_to_gpu(&window).await?;
         let mut renderer = render::PathTracer::new(device, queue, WIDTH, HEIGHT);
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
-        let mut camera = Camera::with_spherical_coords(
+        let mut camera = Camera::from_spherical_coords(
             Vec3::new(0., 0., -1.),
             Vec3::new(0., 1., 0.),
             2.,
@@ -5407,7 +5408,7 @@ camera rotation.
 The new representation is in terms of spherical angles because this is convenient for computing
 movement over a sphere. Often we'll have a particular position in mind for the camera so it's nice
 to have a `Camera::look_at` function that takes an explicit camera origin. Let's bring it back and
-redefine it using the `with_spherical_coords` function. We can compute the altitude and azimuth
+redefine it using the `from_spherical_coords` function. We can compute the altitude and azimuth
 angles from the `origin`, `center`, and `up` parameters:
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
@@ -5419,12 +5420,12 @@ angles from the `origin`, `center`, and `up` parameters:
             let neg_w = center_to_origin.normalized();
             let azimuth = neg_w.x().atan2(neg_w.z());
             let altitude = neg_w.y().asin();
-            Self::with_spherical_coords(center, up, distance, azimuth, altitude)
+            Self::from_spherical_coords(center, up, distance, azimuth, altitude)
         }
 
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
-        pub fn with_spherical_coords(
+        pub fn from_spherical_coords(
             center: Vec3,
             up: Vec3,
             distance: f32,
@@ -7999,12 +8000,10 @@ same result:
 
       let origin = uniforms.camera.origin;
       let focus_distance = 1.;
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
-      let fovy = radians(90.);
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
       let aspect_ratio = f32(uniforms.width) / f32(uniforms.height);
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
-      let viewport_height = 2. * tan(fovy * 0.5) * focus_distance;
+      let fov_y = radians(90.);
+      let viewport_height = 2. * tan(fov_y * 0.5) * focus_distance;
       let viewport_width = viewport_height * aspect_ratio;
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
 
@@ -8027,7 +8026,7 @@ same result:
     [Listing [hardcoded-fov]: <kbd>[shaders.wgsl]</kbd>]
 </script>
 
-This should result in the same image as Figure [turtle-scene-angled]. `fovy` is short for "FOV along
+This should result in the same image as Figure [turtle-scene-angled]. `fov_y` is short for "FOV along
 the y-axis" and represents the vertical field of view angle. Let's change it to 30 degrees:
 
 <script type="preformatted">
@@ -8038,10 +8037,10 @@ the y-axis" and represents the vertical field of view angle. Let's change it to 
 
       let origin = uniforms.camera.origin;
       let focus_distance = 1.;
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
-      let fovy = radians(30.);
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
       let aspect_ratio = f32(uniforms.width) / f32(uniforms.height);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+      let fov_y = radians(30.);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
     ...
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     [Listing [hardcoded-fov]: <kbd>[shaders.wgsl]</kbd>]
@@ -8074,8 +8073,209 @@ Let's move the camera back a little:
 
   ![Figure [vertical-fov-30-deg-zoomed-out]: 30 degrees vertical FOV zoomed out](../images/img-60-fov-30-deg-zoomed-out.png)
 
-Now all spheres are in view and they no longer look distorted. Try plugging in different angles between
-0 degrees and 180 degrees and see how these affect the rendering.
+Now all spheres are in view and they no longer look distorted.
+
+
+Interactive FOV
+---------------
+Let's turn the vertical field of view into a constant field of the `CameraUniforms` structure. This will
+allow us to adjust it interactively like the other camera parameters.
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+    use crate::algebra::Vec3;
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+    const DEFAULT_FOV_Y: f32 = 45_f32.to_radians();
+    const MIN_FOV_Y: f32 = 10_f32.to_radians();
+    const MAX_FOV_Y: f32 = 170_f32.to_radians();
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+
+    #[derive(Debug, Copy, Clone, Pod, Zeroable)]
+    #[repr(C)]
+    pub struct CameraUniforms {
+        origin: Vec3,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        fov_y: f32,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+        u: Vec3,
+        _pad1: u32,
+        v: Vec3,
+        _pad2: u32,
+        w: Vec3,
+        _pad3: u32,
+    }
+    ...
+    impl Camera {
+        ...
+        pub fn from_spherical_coords(
+            center: Vec3,
+            up: Vec3,
+            distance: f32,
+            azimuth: f32,
+            altitude: f32,
+        ) -> Camera {
+            let mut camera = Camera {
+                uniforms: CameraUniforms::zeroed(),
+                center,
+                up,
+                distance,
+                azimuth,
+                altitude,
+            };
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+            camera.uniforms.fov_y = DEFAULT_FOV_Y;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+            camera.calculate_uniforms();
+            camera
+        }
+        ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        pub fn adjust_fov(&mut self, delta: f32) {
+            let fov_y = self.uniforms.fov_y;
+            self.uniforms.fov_y = (fov_y + delta).clamp(MIN_FOV_Y, MAX_FOV_Y);
+        }
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+
+        fn calculate_uniforms(&mut self) {
+        ...
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [fovy-uniform]: <kbd>[camera.rs]</kbd> `fov_y` uniform]
+
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    ...
+    @group(0) @binding(0) var<uniform> uniforms: Uniforms;
+
+    struct CameraUniforms {
+      origin: vec3f,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+      fov_y: f32,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+      u: vec3f,
+      v: vec3f,
+      w: vec3f,
+    }
+
+    struct Rng {
+      state: u32,
+    }
+    var<private> rng: Rng;
+    ...
+    @fragment fn display_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+      init_rng(vec2u(pos.xy));
+
+      let origin = uniforms.camera.origin;
+      let focus_distance = 1.;
+      let aspect_ratio = f32(uniforms.width) / f32(uniforms.height);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+      let fov_y = uniforms.camera.fov_y;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+      ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [fovy-uniform-wgsl]: <kbd>[shaders.wgsl]</kbd>]
+</script>
+
+We're not going to use the mouse this time but use the keyboard. Let's implement a handler for
+`WindowEvent::KeyboardInput` where we'll assign the "up" and "down" arrow keys to increment and
+decrement the vertical FOV by 1 degree:
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+    async fn main() -> Result<()> {
+        ...
+        event_loop.run(|event, control_handle| {
+            control_handle.set_control_flow(ControlFlow::Poll);
+            match event {
+                ...
+                Event::WindowEvent { event, .. } => match event {
+                    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+                    WindowEvent::KeyboardInput { device_id: _, event, ..} => {
+                        use winit::keyboard::{KeyCode, PhysicalKey};
+
+                        if event.state != ElementState::Pressed {
+                            return;
+                        }
+                        match event.physical_key {
+                            PhysicalKey::Code(KeyCode::ArrowUp) => {
+                                camera.adjust_fov(1_f32.to_radians());
+                                renderer.reset_samples();
+                            }
+                            PhysicalKey::Code(KeyCode::ArrowDown) => {
+                                camera.adjust_fov(-1_f32.to_radians());
+                                renderer.reset_samples();
+                            }
+                            _ => (),
+                        }
+                    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+                    WindowEvent::MouseInput { device_id: _, state, button } => {
+                        ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [handle-up-down-arrow-keys]: <kbd>[main.rs]</kbd> Keyboard input for `Camera::adjust_fov`]
+</script>
+
+  ![Figure [vid-10-fovy-up-and-down]: (video) Interactive FOV](../images/vid-10-fovy-up-and-down.mp4 autoplay muted loop)
+
+That feels like a real camera, doesn't it? Let's finally add a function to specify an optional initial FOV value
+during construction:
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+    impl Camera {
+        ...
+        pub fn from_spherical_coords(
+            center: Vec3,
+            up: Vec3,
+            distance: f32,
+            azimuth: f32,
+            altitude: f32,
+        ) -> Camera {
+            ...
+        }
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        pub fn with_fov(mut self, fov_y: f32) -> Self {
+            self.uniforms.fov_y = fov_y;
+            self
+        }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+
+        pub fn uniforms(&self) -> &CameraUniforms {
+            &self.uniforms
+        }
+        ...
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [with-fov-ctor]: <kbd>[camera.rs]</kbd>]
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+    async fn main() -> Result<()> {
+        ...
+        let (device, queue, surface) = connect_to_gpu(&window).await?;
+        let mut renderer = render::PathTracer::new(device, queue, WIDTH, HEIGHT);
+        let mut camera = Camera::look_at(
+            Vec3::new(2.8577466, 5.002403, 3.9194741),
+            Vec3::new(0., 0., 0.),
+            Vec3::new(0., 1., 0.),
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        )
+        .with_fov(30_f32.to_radians());
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+        ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [reposition-camera-for-narrower-fov]: <kbd>[main.rs]</kbd>]
+</script>
+
 
 
                                (insert acknowledgments.md.html here)
