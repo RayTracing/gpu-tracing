@@ -8748,13 +8748,12 @@ algorithm) and "scene bind group":
         });
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
         (pipeline, render_group_layout, scene_group_layout)
-    }
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    }
     ...
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust delete
     fn create_bind_groups(
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
-        (pipeline, render_group_layout, scene_group_layout)
     fn create_render_bind_groups(
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
         device: &wgpu::Device,
@@ -8767,6 +8766,247 @@ algorithm) and "scene bind group":
     [Listing [scene-bind-group-layout]: <kbd>[render.rs]</kbd> Update `create_pipeline` with new bind group layout]
 </script>
 
+Let's now create the scene bind group. We're going to introduce a new function to `SceneBuilder`
+called `build`, which writes the scene data to buffers and assigns them to a bind group:
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+    #[derive(Default)]
+    pub struct SceneBuilder {
+        materials: Vec<Material>,
+    }
+
+    impl SceneBuilder {
+        pub fn add_material(&mut self, material: Material) {
+            self.materials.push(material);
+        }
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+
+        pub fn build(
+            self,
+            device: &wgpu::Device,
+            layout: &wgpu::BindGroupLayout,
+        ) -> wgpu::BindGroup {
+            // Create the buffer already mapped and initialize data without an explicit transfer.
+            let material_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("materials"),
+                size: (std::mem::size_of::<Material>() * self.materials.len()) as u64,
+                usage: wgpu::BufferUsages::STORAGE,
+                mapped_at_creation: true,
+            });
+            // Copy the data into the buffer.
+            {
+                let mut view = material_buffer.slice(..).get_mapped_range_mut();
+                view.as_mut()
+                    .copy_from_slice(bytemuck::cast_slice(self.materials.as_slice()));
+            }
+            material_buffer.unmap();
+
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("scene resources"),
+                layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &material_buffer,
+                        offset: 0,
+                        size: None,
+                    }),
+                }],
+            })
+        }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [scene-builder-build]: <kbd>[scene.rs]</kbd> `SceneBuilder::build`]
+</script>
+
+We start by creating a `wgpu::Buffer` that is large enough to hold the contents of `materials`, which
+is the number of elements multiplied by the size (in bytes) of a `Materials` struct entry. Unlike the
+`uniforms` buffer, we are creating this one with `mapped_at_creation: true` since we'll initialize its
+contents immediately after creation and won't update the buffer later (see our earlier discussion in
+Section [buffer updates]).
+
+The next bit of code may appear a bit wordy if you're not familiar with Rust. It essentially copies
+from the memory range underlying the `materials` collection into the memory mapped region of the GPU
+buffer. The _safe_ mode of Rust allows this to be done via "slices" which are strongly-typed and
+bounds-checked views into memory. Following the copy, we unmap the buffer, create the bind group,
+and return it.[^ch11-footnote6]
+
+Let's put everything together. We'll make the scene bind group a parameter of
+`PathTracer::render_frame`. We'll also add some getters to allow the `main` function of our program
+to access the GPU device and the scene bind group layout:
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+    pub struct PathTracer {
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+
+        uniforms: Uniforms,
+        uniform_buffer: wgpu::Buffer,
+
+        pipeline: wgpu::RenderPipeline,
+        render_bind_groups: [wgpu::BindGroup; 2],
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        scene_group_layout: wgpu::BindGroupLayout,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    }
+    ...
+    impl PathTracer {
+        pub fn new(
+            device: wgpu::Device,
+            queue: wgpu::Queue,
+            width: u32,
+            height: u32,
+        ) -> PathTracer {
+            device.on_uncaptured_error(Box::new(|error| {
+                panic!("Aborting due to an error: {}", error);
+            }));
+
+            let shader_module = compile_shader_module(&device);
+            let (pipeline, render_group_layout, scene_group_layout) =
+                create_pipeline(&device, &shader_module);
+
+            // Initialize the uniform buffer.
+            let uniforms = Uniforms {
+                camera: CameraUniforms::zeroed(),
+                width,
+                height,
+                frame_count: 0,
+                _pad: 0,
+            };
+            let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("uniforms"),
+                size: std::mem::size_of::<Uniforms>() as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+
+            let radiance_samples = create_sample_textures(&device, width, height);
+            let render_bind_groups = create_render_bind_groups(
+                &device,
+                &render_group_layout,
+                &radiance_samples,
+                &uniform_buffer,
+            );
+
+            PathTracer {
+                device,
+                queue,
+                uniforms,
+                uniform_buffer,
+                pipeline,
+                render_bind_groups,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+                scene_group_layout,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+            }
+        }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+
+        pub fn device(&self) -> &wgpu::Device {
+            &self.device
+        }
+
+        pub fn scene_group_layout(&self) -> &wgpu::BindGroupLayout {
+            &self.scene_group_layout
+        }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+
+        pub fn reset_samples(&mut self) {
+            self.uniforms.frame_count = 0;
+        }
+
+        pub fn render_frame(
+            &mut self,
+            camera: &Camera,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+            scene_resources: &wgpu::BindGroup,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+            target: &wgpu::TextureView,
+        ) {
+          ...
+            render_pass.set_pipeline(&self.pipeline);
+            render_pass.set_bind_group(
+                0,
+                &self.render_bind_groups[(self.uniforms.frame_count % 2) as usize],
+                &[],
+            );
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+            render_pass.set_bind_group(1, scene_resources, &[]);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+
+            // Draw 1 instance of a polygon with 6 vertices
+            render_pass.draw(0..6, 0..1);
+            ...
+        }
+        ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [render-frame-scene-resources]: <kbd>[render.rs]</kbd> Update `render_frame` for scene resources]
+</script>
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+    async fn main() -> Result<()> {
+        ...
+        let (device, queue, surface) = connect_to_gpu(&window).await?;
+        let mut renderer = render::PathTracer::new(device, queue, WIDTH, HEIGHT);
+        let mut camera = Camera::look_at(
+            Vec3::new(2.8577466, 5.002403, 3.9194741),
+            Vec3::new(0., 0., 0.),
+            Vec3::new(0., 1., 0.),
+        )
+        .with_fov(30_f32.to_radians());
+
+        let mut builder = SceneBuilder::default();
+        builder.add_material(Material::metal(Vec3::new(0.7, 0.5, 0.5)));
+        builder.add_material(Material::lambertian(Vec3::new(0.5, 0.5, 0.9)));
+        builder.add_material(Material::lambertian(Vec3::new(0.7, 0.9, 0.2)));
+        builder.add_material(Material::transparent_dielectric(Vec3::all(1.), /*ior*/1.5));
+        builder.add_material(Material::opaque(Vec3::new(0.3, 0.6, 0.9), /*metallic*/0.9));
+        builder.add_material(Material::opaque(Vec3::new(0.3, 0.9, 0.7), /*metallic*/0.3));
+        builder.add_material(Material::opaque(Vec3::new(0.9, 0.3, 0.7), /*metallic*/0.001));
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        let scene_resources = builder.build(renderer.device(), renderer.scene_group_layout());
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+
+        let mut left_mouse_button_pressed = false;
+        let mut right_mouse_button_pressed = false;
+
+        event_loop.run(|event, control_handle| {
+            control_handle.set_control_flow(ControlFlow::Poll);
+            match event {
+                Event::WindowEvent { event, .. } => match event {
+                    ...
+                    WindowEvent::RedrawRequested => {
+                        // Wait for the next available frame buffer.
+                        let frame: wgpu::SurfaceTexture = surface
+                            .get_current_texture()
+                            .expect("failed to get current texture");
+
+                        let render_target = frame
+                            .texture
+                            .create_view(&wgpu::TextureViewDescriptor::default());
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+                        renderer.render_frame(&camera, &scene_resources, &render_target);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+
+                        frame.present();
+                        window.request_redraw();
+                    }
+                    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [main-build-scene]: <kbd>[main.rs]</kbd> Create and use the scene resources]
+</script>
+
+Running the program now should result in the same rendering as before.
+
 
 [^ch11-footnote3]: The GPU execution model is called "Single Instruction, Multiple Threads" (SIMT),
 a variant of "Single Instruction, Multiple Data" (SIMD).
@@ -8778,6 +9018,12 @@ storage (CUDA calls it _global_ while Metal calls it _device_).
 
 [^ch11-footnote5]: Improving the coherency of memory accesses is a big challenge with ray tracing and
 remains an important GPU optimization topic.
+
+[^ch11-footnote6]: Another Rust-specific note: the `self` parameter is passed by value and not as a
+reference as usual. This means that `SceneBuilder::build` consumes the `SceneBuilder` that it
+gets invoked with, so a builder cannot be used after a call to `build`. This is a design choice but
+it would also be OK to declare this parameter as `&self` and allow a builder exist beyond a single
+build.
 
 
                                (insert acknowledgments.md.html here)

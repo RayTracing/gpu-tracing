@@ -14,6 +14,7 @@ pub struct PathTracer {
 
     pipeline: wgpu::RenderPipeline,
     render_bind_groups: [wgpu::BindGroup; 2],
+    scene_group_layout: wgpu::BindGroupLayout,
 }
 
 #[derive(Copy, Clone, Pod, Zeroable)]
@@ -71,14 +72,28 @@ impl PathTracer {
             uniform_buffer,
             pipeline,
             render_bind_groups,
+            scene_group_layout,
         }
+    }
+
+    pub fn device(&self) -> &wgpu::Device {
+        &self.device
+    }
+
+    pub fn scene_group_layout(&self) -> &wgpu::BindGroupLayout {
+        &self.scene_group_layout
     }
 
     pub fn reset_samples(&mut self) {
         self.uniforms.frame_count = 0;
     }
 
-    pub fn render_frame(&mut self, camera: &Camera, target: &wgpu::TextureView) {
+    pub fn render_frame(
+        &mut self,
+        camera: &Camera,
+        scene_resources: &wgpu::BindGroup,
+        target: &wgpu::TextureView,
+    ) {
         self.uniforms.camera = *camera.uniforms();
         self.uniforms.frame_count += 1;
         self.queue
@@ -110,6 +125,7 @@ impl PathTracer {
             &self.render_bind_groups[(self.uniforms.frame_count % 2) as usize],
             &[],
         );
+        render_pass.set_bind_group(1, scene_resources, &[]);
 
         // Draw 1 instance of a polygon with 6 vertices
         render_pass.draw(0..6, 0..1);

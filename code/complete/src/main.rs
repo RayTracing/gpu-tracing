@@ -13,8 +13,13 @@ use {
 mod algebra;
 mod camera;
 mod render;
+mod scene;
 
-use crate::{algebra::Vec3, camera::Camera};
+use crate::{
+    algebra::Vec3,
+    camera::Camera,
+    scene::{Material, SceneBuilder},
+};
 
 const WIDTH: u32 = 1600;
 const HEIGHT: u32 = 1200;
@@ -37,6 +42,16 @@ async fn main() -> Result<()> {
         Vec3::new(0., 1., 0.),
     )
     .with_fov(30_f32.to_radians());
+
+    let mut builder = SceneBuilder::default();
+    builder.add_material(Material::metal(Vec3::new(0.7, 0.5, 0.5)));
+    builder.add_material(Material::lambertian(Vec3::new(0.5, 0.5, 0.9)));
+    builder.add_material(Material::lambertian(Vec3::new(0.7, 0.9, 0.2)));
+    builder.add_material(Material::transparent_dielectric(Vec3::all(1.), /*ior*/ 1.5));
+    builder.add_material(Material::opaque(Vec3::new(0.3, 0.6, 0.9), /*metallic*/ 0.9));
+    builder.add_material(Material::opaque(Vec3::new(0.3, 0.9, 0.7), /*metallic*/ 0.3));
+    builder.add_material(Material::opaque(Vec3::new(0.9, 0.3, 0.7), /*metallic*/ 0.001));
+    let scene_resources = builder.build(renderer.device(), renderer.scene_group_layout());
 
     let mut left_mouse_button_pressed = false;
     let mut right_mouse_button_pressed = false;
@@ -92,7 +107,7 @@ async fn main() -> Result<()> {
                         .texture
                         .create_view(&wgpu::TextureViewDescriptor::default());
 
-                    renderer.render_frame(&camera, &render_target);
+                    renderer.render_frame(&camera, &scene_resources, &render_target);
 
                     frame.present();
                     window.request_redraw();
