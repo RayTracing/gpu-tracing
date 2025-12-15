@@ -128,7 +128,9 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn connect_to_gpu(window: &Window) -> Result<(wgpu::Device, wgpu::Queue, wgpu::Surface)> {
+async fn connect_to_gpu(
+    window: &Window,
+) -> Result<(wgpu::Device, wgpu::Queue, wgpu::Surface)> {
     use wgpu::TextureFormat::{Bgra8Unorm, Rgba8Unorm};
 
     // Create an "instance" of wgpu. This is the entry-point to the API.

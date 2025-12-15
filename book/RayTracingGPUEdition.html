@@ -660,8 +660,8 @@ Now that we have the skeleton in place, it's time to paint some pixels on the sc
 [^ch3.1-cit1]: This is actually the default behavior so I didn't really need to call
 `on_uncaptured_error`.
 
-Display Pipeline
-----------------
+Render Pipeline
+---------------
 Before setting up the render pass let's first talk about how it works. Traditionally, graphics
 systems have been modeled after an abstraction called the *graphics pipeline*.[#Hughes13] At a
 very high level, the input to the pipeline is a mathematical model that describes what to draw
@@ -756,7 +756,7 @@ The `compile_shader_module` function loads the file we just created into a strin
 time. This is followed by a call to `wgpu::Device::create_shader_module` to compile the WGSL source
 code.[^ch3-footnote2]
 
-Let's define the vertex and fragment functions, which I'm calling `display_vs` and `display_fs`:
+Let's define the vertex and fragment functions, which I'm calling `path_tracer_vs` and `path_tracer_fs`:
 
 <script type="preformatted">
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
@@ -767,11 +767,11 @@ Let's define the vertex and fragment functions, which I'm calling `display_vs` a
       vec2f( 0.0,  0.5),
     );
 
-    @vertex fn display_vs(@builtin(vertex_index) vid: u32) -> @builtin(position) vec4f {
+    @vertex fn path_tracer_vs(@builtin(vertex_index) vid: u32) -> @builtin(position) vec4f {
       return vec4f(vertices[vid], 0.0, 1.0);
     }
 
-    @fragment fn display_fs() -> @location(0) vec4f {
+    @fragment fn path_tracer_fs() -> @location(0) vec4f {
       return vec4f(1.0, 0.0, 0.0, 1.0);
     }
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -779,16 +779,15 @@ Let's define the vertex and fragment functions, which I'm calling `display_vs` a
 </script>
 
 I'm using the "vs" and "fs" suffixes as shorthand for "vertex stage" and "fragment stage". Together,
-these two functions form our "display pipeline" (the "display" part will become more clear later).
-The `@vertex` and `@fragment` annotations are WGSL keywords that mark these two functions as entry
-points to each pipeline stage program.
+these two functions form our pipeline. The `@vertex` and `@fragment` annotations are WGSL keywords
+that mark these two functions as entry points to each pipeline stage program.
 
 Since graphics workloads generally involve a high amount of linear algebra, GPUs natively support
 SIMD operations over vectors and matrices. All shading languages define built-in types for vectors
 and matrices of up to 4 dimensions (4x4 in the case of matrices). The `vec4f` and `vec2f` types that
 are in the code represent 4D and 2D vectors of floating point numbers.
 
-`display_vs` returns the vertex position as a `vec4f`. This position is defined relative to a
+`path_tracer_vs` returns the vertex position as a `vec4f`. This position is defined relative to a
 coordinate space called the *Normalized Device Coordinate Space*. In NDC, the center of the viewport
 marks the origin $(0, 0, 0)$. The $x$-axis spans horizontally from $(-1, 0, 0)$ on the left edge of
 the viewport to $(1, 0, 0)$ on the right edge while the $y$-axis spans vertically from $(0,-1,0)$ at
@@ -797,11 +796,11 @@ the bottom to $(0,1,0)$ at the top. The $z$-axis is directly perpendicular to th
 
   ![Figure [ndc]: Our triangle in Normalized Device Coordinates](../images/fig-02-ndc.svg)
 
-`display_vs` takes a *vertex index* as its parameter. The vertex function gets invoked for every
+`path_tracer_vs` takes a *vertex index* as its parameter. The vertex function gets invoked for every
 input vertex across different GPU threads. `vid` identifies the individual vertex that is assigned
 to the *invocation*. The number of vertices and where they exist within the topology of the input
 geometry is up to us to define. Since we want to draw a triangle, we'll later issue a *draw call*
-with 3 vertices and `display_vs` will get invoked exactly 3 times with vertex indices ranging from
+with 3 vertices and `path_tracer_vs` will get invoked exactly 3 times with vertex indices ranging from
 $0$ to $2$.
 
 Since our 2D triangle is viewport-aligned, we can set the $z$ coordinate to $0$. The 4th
@@ -811,8 +810,8 @@ this coordinate to $1$. We can declare the $x$ and $y$ coordinates for the 3 ver
 of `vec2f` and simply return the element that corresponds to `vid`. I enumerate the vertices in
 counter-clockwise order which matches the winding order we'll specify when we create the pipeline.
 
-`display_fs` takes no inputs and returns a `vec4f` that represents the fragment color. The 4
-dimensions represent the red, green, blue, and alpha channels of the destination pixel. `display_fs`
+`path_tracer_fs` takes no inputs and returns a `vec4f` that represents the fragment color. The 4
+dimensions represent the red, green, blue, and alpha channels of the destination pixel. `path_tracer_fs`
 gets invoked for all pixel fragments that result from our triangle and the invocations are executed
 in parallel across many GPU threads, just like the vertex function. To paint the triangle solid red,
 we simply return `vec4f(1., 0., 0., 1.)` for all fragments.
@@ -825,7 +824,7 @@ important detail for us.
 
 Before we can run the shaders, we need to assemble them into a *pipeline state object*. This is
 where we specify the data layout of the render pipeline and link the shaders into a runnable binary
-program. Let's add a new function called `create_display_pipeline`:
+program. Let's add a new function called `create_pipeline`:
 
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
@@ -841,12 +840,12 @@ program. Let's add a new function called `create_display_pipeline`:
     }
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
 
-    fn create_display_pipeline(
+    fn create_pipeline(
         device: &wgpu::Device,
         shader_module: &wgpu::ShaderModule,
     ) -> wgpu::RenderPipeline {
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("display"),
+            label: Some("path tracer"),
             layout: None,
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
@@ -856,12 +855,12 @@ program. Let's add a new function called `create_display_pipeline`:
             },
             vertex: wgpu::VertexState {
                 module: shader_module,
-                entry_point: Some("display_vs"),
+                entry_point: Some("path_tracer_vs"),
                 buffers: &[],
             },
             fragment: Some(wgpu::FragmentState {
                 module: shader_module,
-                entry_point: Some("display_fs"),
+                entry_point: Some("path_tracer_fs"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: wgpu::TextureFormat::Bgra8Unorm,
                     blend: None,
@@ -875,16 +874,16 @@ program. Let's add a new function called `create_display_pipeline`:
         })
     }
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    [Listing [display-pipeline]: <kbd>[render.rs]</kbd> The `create_display_pipeline` function]
+    [Listing [path-tracer-pipeline]: <kbd>[render.rs]</kbd> The `create_pipeline` function]
 
 This code describes a render pipeline that draws a list of triangle primitives. The vertex winding
 order is set to counter-clockwise which defines the orientation of the triangle's *front
 face*.[^ch3-footnote3]
 
 We request that the interior of each polygon be completely filled (rather than drawing just the
-edges or vertices). We specify that `display_vs` is the main function of the vertex stage and that
+edges or vertices). We specify that `path_tracer_vs` is the main function of the vertex stage and that
 we're not providing any vertex data from the CPU (since we declared our vertices in the shader
-code). Similarly, we set up a fragment stage with `display_fs` as the entry point and a single
+code). Similarly, we set up a fragment stage with `path_tracer_fs` as the entry point and a single
 color target.[^ch3-footnote4] I set the pixel format of the render target to `Bgra8Unorm`  since
 that happens to be widely supported on all of my devices. What's important is that you assign a
 pixel format that matches the surface configuration in your windowing setup and that your GPU device
@@ -900,7 +899,7 @@ later when drawing a frame:
         queue: wgpu::Queue,
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
 
-        display_pipeline: wgpu::RenderPipeline,
+        pipeline: wgpu::RenderPipeline,
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
     }
 
@@ -912,20 +911,20 @@ later when drawing a frame:
 
             let shader_module = compile_shader_module(&device);
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
-            let display_pipeline = create_display_pipeline(&device, &shader_module);
+            let pipeline = create_pipeline(&device, &shader_module);
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
 
             PathTracer {
                 device,
                 queue,
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
-                display_pipeline,
+                pipeline,
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
             }
         }
         ...
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    [Listing [display-pipeline-init]: <kbd>[render.rs]</kbd> Initializing the display pipeline]
+    [Listing [render-pipeline-init]: <kbd>[render.rs]</kbd> Initializing the render pipeline]
 
 
 [^ch3-footnote3]: The GPU can automatically discard triangles that are oriented away from the
@@ -971,7 +970,7 @@ created earlier:
                 });
 
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("display pass"),
+                label: Some("path tracer render pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: target,
                     depth_slice: None,
@@ -984,7 +983,7 @@ created earlier:
                 ..Default::default()
             });
 
-            render_pass.set_pipeline(&self.display_pipeline);
+            render_pass.set_pipeline(&self.pipeline);
 
             // Draw 1 instance of a polygon with 3 vertices.
             render_pass.draw(0..3, 0..1);
@@ -1063,10 +1062,7 @@ render pipeline to shape, animate, and render millions of triangles many times p
 
 Full-Screen Quad
 ----------------
-The render pipeline that we just put together plays a rather small role in the overall renderer:
-its purpose is to display the output of the path-tracer on the window surface.
-
-The output of our renderer is a 2D rectangular image and I would like it to fill the whole window.
+The output of our renderer is a 2D rectangular image and it should fill the whole window.
 We can achieve this by having the render pipeline draw two right triangles that are adjacent at
 their hypothenuse. Remember that the viewport coordinates span the range $[-1, 1]$ in NDC, so
 setting the 4 corners of the rectangle to $(-1, 1)$, $(1, 1)$, $(1, -1)$, $(-1, -1)$ should cover
@@ -1092,11 +1088,11 @@ the entire viewport regardless of its dimensions.
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
     );
 
-    @vertex fn display_vs(@builtin(vertex_index) vid: u32) -> @builtin(position) vec4f {
+    @vertex fn path_tracer_vs(@builtin(vertex_index) vid: u32) -> @builtin(position) vec4f {
       return vec4f(vertices[vid], 0.0, 1.0);
     }
 
-    @fragment fn display_fs() -> @location(0) vec4f {
+    @fragment fn path_tracer_fs() -> @location(0) vec4f {
       return vec4f(1.0, 0.0, 0.0, 1.0);
     }
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1116,7 +1112,7 @@ count:
         ...
         pub fn render_frame(&self, target: &wgpu::TextureView) {
             ...
-            render_pass.set_pipeline(&self.display_pipeline);
+            render_pass.set_pipeline(&self.pipeline);
 
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust delete
@@ -1151,7 +1147,7 @@ that pixel using the built-in `position` input to the pipeline stage.
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
     ...
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
-    @fragment fn display_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+    @fragment fn path_tracer_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
       return vec4f(1.0, 0.0, 0.0, 1.0);
     }
@@ -1180,7 +1176,7 @@ value to convert it to that range:
     const HEIGHT: u32 = 600u;
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
 
-    @fragment fn display_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+    @fragment fn path_tracer_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
       let color = pos.xy / vec2f(f32(WIDTH - 1u), f32(HEIGHT - 1u));
       return vec4f(color, 0.0, 1.0);
@@ -1251,7 +1247,7 @@ and assign it to binding index $0$:
     const HEIGHT: u32 = 600u;
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
 
-    @fragment fn display_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+    @fragment fn path_tracer_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
       let color = pos.xy / vec2f(f32(uniforms.width - 1u), f32(uniforms.height - 1u));
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
@@ -1269,8 +1265,8 @@ expression like `uniforms.width`.
 Bind Group Layout
 -----------------
 If you run the code now you should get a validation error telling you that the pipeline layout
-expects a bind group layout at index $0$. We need to update the display pipeline description with a
-layout that includes the new uniform binding. Let's update the `create_display_pipeline` function
+expects a bind group layout at index $0$. We need to update the render pipeline description with a
+layout that includes the new uniform binding. Let's update the `create_pipeline` function
 to return a `wgpu::BindGroupLayout` alongside the pipeline object:
 
 
@@ -1283,15 +1279,14 @@ to return a `wgpu::BindGroupLayout` alongside the pipeline object:
 
             let shader_module = compile_shader_module(&device);
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
-            let (display_pipeline, display_layout) =
-                create_display_pipeline(&device, &shader_module);
+            let (pipeline, layout) = create_pipeline(&device, &shader_module);
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
             ...
         }
         ...
     }
     ...
-    fn create_display_pipeline(
+    fn create_pipeline(
         device: &wgpu::Device,
         shader_module: &wgpu::ShaderModule,
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
@@ -1313,7 +1308,7 @@ to return a `wgpu::BindGroupLayout` alongside the pipeline object:
         });
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
-            label: Some("display"),
+            label: Some("path tracer"),
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
             layout: Some(&device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 bind_group_layouts: &[&bind_group_layout],
@@ -1327,7 +1322,7 @@ to return a `wgpu::BindGroupLayout` alongside the pipeline object:
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
     }
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    [Listing [display-pipeline-layout]: <kbd>[render.rs]</kbd> Display pipeline layout]
+    [Listing [render-pipeline-layout]: <kbd>[render.rs]</kbd> Render pipeline layout]
 
 This says that the pipeline contains a single bind group, containing a single buffer entry. The
 buffer entry has the "uniform" buffer binding type and is visible only to the fragment stage.
@@ -1351,7 +1346,7 @@ the CPU side:
         device: wgpu::Device,
         queue: wgpu::Queue,
 
-        display_pipeline: wgpu::RenderPipeline,
+        pipeline: wgpu::RenderPipeline,
     }
 
 
@@ -1408,7 +1403,7 @@ Now, let's allocate the backing buffer object and initialize its contents:
 
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
-        display_pipeline: wgpu::RenderPipeline,
+        pipeline: wgpu::RenderPipeline,
     }
 
     #[derive(Copy, Clone, Pod, Zeroable)]
@@ -1425,8 +1420,7 @@ Now, let's allocate the backing buffer object and initialize its contents:
             }));
 
             let shader_module = compile_shader_module(&device);
-            let (display_pipeline, display_layout) =
-                create_display_pipeline(&device, &shader_module);
+            let (pipeline, layout) = create_pipeline(&device, &shader_module);
 
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
@@ -1456,7 +1450,7 @@ Now, let's allocate the backing buffer object and initialize its contents:
                 uniforms,
                 uniform_buffer,
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
-                display_pipeline,
+                pipeline,
             }
         }
         ...
@@ -1494,9 +1488,9 @@ encoding the draw:
         uniforms: Uniforms,
         uniform_buffer: wgpu::Buffer,
 
-        display_pipeline: wgpu::RenderPipeline,
+        pipeline: wgpu::RenderPipeline,
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
-        display_bind_group: wgpu::BindGroup,
+        bind_group: wgpu::BindGroup,
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
     }
 
@@ -1514,10 +1508,10 @@ encoding the draw:
 
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
-            // Create the display pipeline bind group.
-            let display_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            // Create the path tracer pipeline bind group.
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: None,
-                layout: &display_layout,
+                layout: &layout,
                 entries: &[wgpu::BindGroupEntry {
                     binding: 0,
                     resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
@@ -1535,18 +1529,18 @@ encoding the draw:
                 queue,
                 uniforms,
                 uniform_buffer,
-                display_pipeline,
+                pipeline,
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
-                display_bind_group,
+                bind_group,
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
             }
         }
 
         pub fn render_frame(&self, target: &wgpu::TextureView) {
             ...
-            render_pass.set_pipeline(&self.display_pipeline);
+            render_pass.set_pipeline(&self.pipeline);
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
-            render_pass.set_bind_group(0, &self.display_bind_group, &[]);
+            render_pass.set_bind_group(0, &self.bind_group, &[]);
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
 
             // Draw 1 instance of a polygon with 6 vertices
@@ -1555,7 +1549,7 @@ encoding the draw:
         }
     }
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    [Listing [display-bind-group]: <kbd>[render.rs]</kbd> Creating and using the display bind group]
+    [Listing [renderer-bind-group]: <kbd>[render.rs]</kbd> Creating and using the bind group]
 
 Running the program now should bring up the same picture as before. The viewport dimensions are
 still hardcoded in two places so let's clean that up by making the viewport width and height
@@ -1577,8 +1571,7 @@ parameters of the `PathTracer` constructor:
             }));
 
             let shader_module = compile_shader_module(&device);
-            let (display_pipeline, display_layout) =
-                create_display_pipeline(&device, &shader_module);
+            let (pipeline, layout) = create_pipeline(&device, &shader_module);
 
             // Initialize the uniform buffer.
             let uniforms = Uniforms {
@@ -1705,7 +1698,7 @@ to our new camera coordinate space:
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
     ...
-    @fragment fn display_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+    @fragment fn path_tracer_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL delete
       let color = pos.xy / vec2f(f32(uniforms.width - 1u), f32(uniforms.height - 1u));
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
@@ -1738,7 +1731,7 @@ In the code, I'll refer to $f$ as `focus_distance`:
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
     ...
-    @fragment fn display_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+    @fragment fn path_tracer_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
       let origin = vec3(0.);
       let focus_distance = 1.;
@@ -1788,7 +1781,7 @@ fragment color. I used the same colors as RTIOW but you can use different ones:[
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
     ...
-    @fragment fn display_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+    @fragment fn path_tracer_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
       let origin = vec3(0.);
       let focus_distance = 1.;
       let aspect_ratio = f32(uniforms.width) / f32(uniforms.height);
@@ -1918,7 +1911,7 @@ enough away from the view origin so that the camera doesn't fall inside the sphe
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
     ...
-    @fragment fn display_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+    @fragment fn path_tracer_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
       let origin = vec3(0.);
       let focus_distance = 1.;
       let aspect_ratio = f32(uniforms.width) / f32(uniforms.height);
@@ -2008,7 +2001,7 @@ support infinities[^ch5-footnote4], I'll use the largest representable `f32` val
       Sphere(/*center*/ vec3(0., -100.5, -1.), /*radius*/ 100.),
     );
     ...
-    @fragment fn display_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+    @fragment fn path_tracer_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
       let origin = vec3(0.);
       let focus_distance = 1.;
       let aspect_ratio = f32(uniforms.width) / f32(uniforms.height);
@@ -2064,7 +2057,7 @@ shaded black:
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
     ...
-    @fragment fn display_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+    @fragment fn path_tracer_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
       let origin = vec3(0.);
       let focus_distance = 1.;
       let aspect_ratio = f32(uniforms.width) / f32(uniforms.height);
@@ -2262,7 +2255,7 @@ to a color value (in the $[0, 1]$ range):
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
     ...
-    @fragment fn display_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+    @fragment fn path_tracer_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
       let origin = vec3(0.);
       let focus_distance = 1.;
       let aspect_ratio = f32(uniforms.width) / f32(uniforms.height);
@@ -2380,8 +2373,7 @@ average:
             }));
 
             let shader_module = compile_shader_module(&device);
-            let (display_pipeline, display_layout) =
-                create_display_pipeline(&device, &shader_module);
+            let (pipeline, layout) = create_pipeline(&device, &shader_module);
 
             // Initialize the uniform buffer.
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
@@ -2540,8 +2532,7 @@ to complete before the shader runs and reads from the buffer:
             }));
 
             let shader_module = compile_shader_module(&device);
-            let (display_pipeline, display_layout) =
-                create_display_pipeline(&device, &shader_module);
+            let (pipeline, layout) = create_pipeline(&device, &shader_module);
 
             // Initialize the uniform buffer.
             let uniforms = Uniforms {
@@ -2586,7 +2577,7 @@ shrink and expand:
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
     ...
-    @fragment fn display_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+    @fragment fn path_tracer_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
       ...
       var closest_hit = Intersection(vec3(0.), FLT_MAX);
       for (var i = 0u; i < OBJECT_COUNT; i += 1u) {
@@ -2653,7 +2644,7 @@ running sums across frames:
         uniforms: Uniforms,
         uniform_buffer: wgpu::Buffer,
 
-        display_pipeline: wgpu::RenderPipeline,
+        pipeline: wgpu::RenderPipeline,
     }
 
     #[derive(Copy, Clone, Pod, Zeroable)]
@@ -2676,8 +2667,7 @@ running sums across frames:
             }));
 
             let shader_module = compile_shader_module(&device);
-            let (display_pipeline, display_layout) =
-                create_display_pipeline(&device, &shader_module);
+            let (pipeline, layout) = create_pipeline(&device, &shader_module);
 
             // Initialize the uniform buffer.
             let uniforms = Uniforms {
@@ -2703,7 +2693,7 @@ running sums across frames:
                 queue,
                 uniforms,
                 uniform_buffer,
-                display_pipeline,
+                pipeline,
             }
         }
         ...
@@ -2763,7 +2753,7 @@ Start by changing the type of `radiance_samples` to an array of 2 textures:
         uniforms: Uniforms,
         uniform_buffer: wgpu::Buffer,
 
-        display_pipeline: wgpu::RenderPipeline,
+        pipeline: wgpu::RenderPipeline,
     }
 
     #[derive(Copy, Clone, Pod, Zeroable)]
@@ -2826,7 +2816,7 @@ binding (the updated sums):
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
     ...
-    fn create_display_pipeline(
+    fn create_pipeline(
         device: &wgpu::Device,
         shader_module: &wgpu::ShaderModule,
     ) -> (wgpu::RenderPipeline, wgpu::BindGroupLayout) {
@@ -2889,9 +2879,9 @@ create two bind groups with the textures swapped and alternate those at render t
         uniforms: Uniforms,
         uniform_buffer: wgpu::Buffer,
 
-        display_pipeline: wgpu::RenderPipeline,
+        pipeline: wgpu::RenderPipeline,
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
-        display_bind_groups: [wgpu::BindGroup; 2],
+        bind_groups: [wgpu::BindGroup; 2],
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
     }
 
@@ -2915,8 +2905,7 @@ create two bind groups with the textures swapped and alternate those at render t
             }));
 
             let shader_module = compile_shader_module(&device);
-            let (display_pipeline, display_layout) =
-                create_display_pipeline(&device, &shader_module);
+            let (pipeline, layout) = create_pipeline(&device, &shader_module);
 
             // Initialize the uniform buffer.
             let uniforms = Uniforms {
@@ -2933,9 +2922,9 @@ create two bind groups with the textures swapped and alternate those at render t
 
             let radiance_samples = create_sample_textures(&device, width, height);
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
-            let display_bind_groups = create_display_bind_groups(
+            let bind_groups = create_bind_groups(
                 &device,
-                &display_layout,
+                &layout,
                 &radiance_samples,
                 &uniform_buffer,
             );
@@ -2946,9 +2935,9 @@ create two bind groups with the textures swapped and alternate those at render t
                 queue,
                 uniforms,
                 uniform_buffer,
-                display_pipeline,
+                pipeline,
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
-                display_bind_groups,
+                bind_groups,
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
             }
         }
@@ -2957,7 +2946,7 @@ create two bind groups with the textures swapped and alternate those at render t
     ...
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
 
-    fn create_display_bind_groups(
+    fn create_bind_groups(
         device: &wgpu::Device,
         layout: &wgpu::BindGroupLayout,
         textures: &[wgpu::Texture; 2],
@@ -3037,7 +3026,7 @@ Now, let's update the shader:
     @group(0) @binding(2) var radiance_samples_new: texture_storage_2d<rgba32float, write>;
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
     ...
-    @fragment fn display_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+    @fragment fn path_tracer_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
       let origin = vec3(0.);
       let focus_distance = 1.;
       let aspect_ratio = f32(uniforms.width) / f32(uniforms.height);
@@ -3115,7 +3104,7 @@ the two bind groups we created, using even and odd values of `frame_count` as a 
                 });
 
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("display pass"),
+                label: Some("path tracer render pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: target,
                     depth_slice: None,
@@ -3128,11 +3117,11 @@ the two bind groups we created, using even and odd values of `frame_count` as a 
                 ..Default::default()
             });
 
-            render_pass.set_pipeline(&self.display_pipeline);
+            render_pass.set_pipeline(&self.pipeline);
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
             render_pass.set_bind_group(
                 0,
-                &self.display_bind_groups[(self.uniforms.frame_count % 2) as usize],
+                &self.bind_groups[(self.uniforms.frame_count % 2) as usize],
                 &[],
             );
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
@@ -3179,7 +3168,7 @@ Let's undo the animation and bring back the static spheres.
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
     ...
-    @fragment fn display_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+    @fragment fn path_tracer_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
       ...
       let direction = vec3(uv, -focus_distance);
       let ray = Ray(origin, direction);
@@ -3224,7 +3213,7 @@ offsets range within $[-0.5, 0.5]$ in both coordinate directions:
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
     ...
-    @fragment fn display_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+    @fragment fn path_tracer_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
       let origin = vec3(0.);
       let focus_distance = 1.;
       let aspect_ratio = f32(uniforms.width) / f32(uniforms.height);
@@ -3352,7 +3341,7 @@ Now to change the offset computation in the fragment shader to pick a random coo
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
     ...
-    @fragment fn display_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+    @fragment fn path_tracer_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
       init_rng(vec2u(pos.xy));
 
@@ -3474,7 +3463,7 @@ new function responsible for traversing the scene and finding an intersection, c
 
     ...
 
-    @fragment fn display_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+    @fragment fn path_tracer_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
       init_rng(vec2u(pos.xy));
 
       let origin = vec3(0.);
@@ -3575,7 +3564,7 @@ emitted by any light source that we encounter (which is just the sky for now):
 
     ...
 
-    @fragment fn display_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+    @fragment fn path_tracer_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
       init_rng(vec2u(pos.xy));
 
       let origin = vec3(0.);
@@ -3709,7 +3698,7 @@ The formula for gamma ($\gamma$) encoding is $V_{out} = V_{in}^{\frac{1}{\gamma}
 this function in the fragment shader right before outputting the color:
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
-    @fragment fn display_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+    @fragment fn path_tracer_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
       ...
       // Compute and store the new sum.
       let new_sum = radiance_sample + old_sum;
@@ -4142,7 +4131,7 @@ the program. Let's define a new `CameraUniforms` structure that just stores the 
     }
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
     ...
-    @fragment fn display_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+    @fragment fn path_tracer_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
       init_rng(vec2u(pos.xy));
 
 
@@ -4243,8 +4232,7 @@ We'll also reposition the camera origin to verify our changes:
             }));
 
             let shader_module = compile_shader_module(&device);
-            let (display_pipeline, display_layout) =
-                create_display_pipeline(&device, &shader_module);
+            let (pipeline, layout) = create_pipeline(&device, &shader_module);
 
             // Initialize the uniform buffer.
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
@@ -4458,7 +4446,7 @@ $\vec{\textbf{w}}$.
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
     }
     ...
-    @fragment fn display_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+    @fragment fn path_tracer_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
       init_rng(vec2u(pos.xy));
 
       let origin = uniforms.camera.origin;
@@ -5531,7 +5519,7 @@ there instead. We'll declare a separate array to store the `Material` instances 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
     );
     ...
-    @fragment fn display_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+    @fragment fn path_tracer_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
       ...
       var path_length = 0u;
       while path_length < MAX_PATH_LENGTH {
@@ -7998,7 +7986,7 @@ same result:
 <script type="preformatted">
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
     ...
-    @fragment fn display_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+    @fragment fn path_tracer_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
       init_rng(vec2u(pos.xy));
 
       let origin = uniforms.camera.origin;
@@ -8035,7 +8023,7 @@ the y-axis" and represents the vertical field of view angle. Let's change it to 
 <script type="preformatted">
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
     ...
-    @fragment fn display_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+    @fragment fn path_tracer_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
       init_rng(vec2u(pos.xy));
 
       let origin = uniforms.camera.origin;
@@ -8170,7 +8158,7 @@ like the other camera parameters.
     }
     var<private> rng: Rng;
     ...
-    @fragment fn display_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+    @fragment fn path_tracer_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
       init_rng(vec2u(pos.xy));
 
       let origin = uniforms.camera.origin;
@@ -8413,6 +8401,16 @@ Using our new utility, we can now recreate our existing material list on the CPU
 <script type="preformatted">
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
     ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust delete
+    use crate::{algebra::Vec3, camera::Camera};
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+    use crate::{
+        algebra::Vec3,
+        camera::Camera,
+        scene::{Material, SceneBuilder},
+    };
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
     async fn main() -> Result<()> {
         ...
         let (device, queue, surface) = connect_to_gpu(&window).await?;
@@ -8555,6 +8553,213 @@ omitted (as we have in Listing [materials-buffer-binding]), the size of the boun
 determined at runtime. This provides a lot of flexibility as each scene can be stored in a
 separate buffer that is sized according to its contents. This also forces us to use the storage
 address space.
+
+Let's update the `create_pipeline` function with the new bind group layout. As before, we'll have
+`create_pipeline` create the layout descriptor and return it. Let's also rename the variables that
+reference the existing bind group to distinguish them from the bind group related to scene
+resources. Let's call these two groups "render bind group" (for bindings related to the rendering
+algorithm) and "scene bind group":
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+    pub struct PathTracer {
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+
+        uniforms: Uniforms,
+        uniform_buffer: wgpu::Buffer,
+
+        pipeline: wgpu::RenderPipeline,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        render_bind_groups: [wgpu::BindGroup; 2],
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    }
+    ...
+    impl PathTracer {
+        pub fn new(
+            device: wgpu::Device,
+            queue: wgpu::Queue,
+            width: u32,
+            height: u32,
+        ) -> PathTracer {
+            device.on_uncaptured_error(Box::new(|error| {
+                panic!("Aborting due to an error: {}", error);
+            }));
+
+            let shader_module = compile_shader_module(&device);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+            let (pipeline, render_group_layout, scene_group_layout) =
+                create_pipeline(&device, &shader_module);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+
+            // Initialize the uniform buffer.
+            let uniforms = Uniforms {
+                camera: CameraUniforms::zeroed(),
+                width,
+                height,
+                frame_count: 0,
+                _pad: 0,
+            };
+            let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("uniforms"),
+                size: std::mem::size_of::<Uniforms>() as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+
+            let radiance_samples = create_sample_textures(&device, width, height);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+            let render_bind_groups = create_render_bind_groups(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+                &device,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+                &render_group_layout,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+                &radiance_samples,
+                &uniform_buffer,
+            );
+
+            PathTracer {
+                device,
+                queue,
+                uniforms,
+                uniform_buffer,
+                pipeline,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+                render_bind_groups,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+            }
+        }
+        ...
+        pub fn render_frame(&mut self, camera: &Camera, target: &wgpu::TextureView) {
+            ...
+            render_pass.set_pipeline(&self.pipeline);
+            render_pass.set_bind_group(
+                0,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+                &self.render_bind_groups[(self.uniforms.frame_count % 2) as usize],
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+                &[],
+            );
+            ...
+        }
+        ...
+    }
+    ...
+    fn create_pipeline(
+        device: &wgpu::Device,
+        shader_module: &wgpu::ShaderModule,
+    ) -> (wgpu::RenderPipeline, wgpu::BindGroupLayout, wgpu::BindGroupLayout) {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        let render_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+            label: None,
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::StorageTexture {
+                        access: wgpu::StorageTextureAccess::WriteOnly,
+                        format: wgpu::TextureFormat::Rgba32Float,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                    },
+                    count: None,
+                },
+            ],
+        });
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        let scene_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("scene resource layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("path tracer"),
+            layout: Some(
+                &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+                    bind_group_layouts: &[&render_group_layout, &scene_group_layout],
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+                    ..Default::default()
+                }),
+            ),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                front_face: wgpu::FrontFace::Ccw,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                ..Default::default()
+            },
+            vertex: wgpu::VertexState {
+                module: shader_module,
+                entry_point: Some("path_tracer_vs"),
+                compilation_options: Default::default(),
+                buffers: &[],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: shader_module,
+                entry_point: Some("path_tracer_fs"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: wgpu::TextureFormat::Bgra8Unorm,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        (pipeline, render_group_layout, scene_group_layout)
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust delete
+    fn create_bind_groups(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        (pipeline, render_group_layout, scene_group_layout)
+    fn create_render_bind_groups(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+        device: &wgpu::Device,
+        layout: &wgpu::BindGroupLayout,
+        textures: &[wgpu::Texture; 2],
+        uniform_buffer: &wgpu::Buffer,
+    ) -> [wgpu::BindGroup; 2] {
+      ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [scene-bind-group-layout]: <kbd>[render.rs]</kbd> Update `create_pipeline` with new bind group layout]
+</script>
 
 
 [^ch11-footnote3]: The GPU execution model is called "Single Instruction, Multiple Threads" (SIMT),
