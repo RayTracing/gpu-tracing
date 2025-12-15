@@ -19,7 +19,7 @@ _Ray Tracing_ is a rendering method in Computer Graphics that simulates the flow
 faithfully recreate a variety of optical phenomena and can be used to render photorealistic images.
 
 _Path tracing_ is an application of this approach used to compute _Global Illumination_. Its
-core idea is to repeatedly trace millions of random rays through the scene and bounce them off
+core idea is to repeatedly trace millions of random rays through a scene and bounce them off
 objects based on surface properties. The algorithm is remarkably simple and relatively easy
 to implement when applied to a small number of material and geometry types. Peter
 Shirley's [_Ray Tracing In One Weekend_][RTIOW] (RTIOW) is a great introduction to building the
@@ -1954,13 +1954,12 @@ to $r^2$.
 Shading Multiple Spheres
 ------------------------
 Now that our sphere intersection code is working, we'll next generalize the ray casting logic to
-look for intersections in a _scene_ containing multiple objects. We can initially represent the
-scene as an array of spheres. We'll change the code to test all spheres for a possible hit and use
-the closest intersection to color the pixel. As before, we'll use the $t$ parameter to determine the
-nearest hit.
+look for intersections in a scene containing multiple objects. We'll define an array of spheres
+and change the code to test all spheres for a possible hit. The closest hit will determine the
+color of the pixel. As before, we'll use the $t$ parameter to determine the nearest hit.
 
-Let's declare the scene with a second (large) sphere that serves as the "ground" where our first
-sphere will sit. We can declare the array as a private global, like we did for the vertices of the
+Let's also declare a second larger sphere that serves as the "ground" for the first sphere to rest
+on. We can declare the array as a private global, like we did for the vertices of the
 full-screen quad:
 
 <script type="preformatted">
@@ -1968,8 +1967,8 @@ full-screen quad:
     ...
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
     const OBJECT_COUNT: u32 = 2;
-    alias Scene = array<Sphere, OBJECT_COUNT>;
-    var<private> scene: Scene = Scene(
+    alias Spheres = array<Sphere, OBJECT_COUNT>;
+    var<private> spheres: Spheres = Spheres(
       Sphere(/*center*/ vec3(0., 0., -1.), /*radius*/ 0.5),
       Sphere(/*center*/ vec3(0., -100.5, -1.), /*radius*/ 100.),
     );
@@ -1991,7 +1990,7 @@ full-screen quad:
 </script>
 
 
-The scene traversal code is straightforward: loop through the scene array and keep track of the
+The scene traversal code is straightforward: loop through the `spheres` array and keep track of the
 closest $t$ value that results from calling `intersect_sphere` on each element. It makes sense to
 initialize $t$ with a value that is larger than all other possible values. Since we're dealing with
 floating-point numbers, _infinity_ is a suitable initial value. However, since WGSL doesn't quite
@@ -2003,8 +2002,8 @@ support infinities[^ch5-footnote4], I'll use the largest representable `f32` val
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
     ...
     const OBJECT_COUNT: u32 = 2;
-    alias Scene = array<Sphere, OBJECT_COUNT>;
-    var<private> scene: Scene = Scene(
+    alias Spheres = array<Sphere, OBJECT_COUNT>;
+    var<private> spheres: Spheres = Spheres(
       Sphere(/*center*/ vec3(0., 0., -1.), /*radius*/ 0.5),
       Sphere(/*center*/ vec3(0., -100.5, -1.), /*radius*/ 100.),
     );
@@ -2028,7 +2027,7 @@ support infinities[^ch5-footnote4], I'll use the largest representable `f32` val
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
       var closest_t = FLT_MAX;
       for (var i = 0u; i < OBJECT_COUNT; i += 1u) {
-        let t = intersect_sphere(ray, scene[i]);
+        let t = intersect_sphere(ray, spheres[i]);
         if t > 0. && t < closest_t {
           closest_t = t;
         }
@@ -2078,7 +2077,7 @@ shaded black:
       let ray = Ray(origin, direction);
       var closest_t = FLT_MAX;
       for (var i = 0u; i < OBJECT_COUNT; i += 1u) {
-        let t = intersect_sphere(ray, scene[i]);
+        let t = intersect_sphere(ray, spheres[i]);
         if t > 0. && t < closest_t {
           closest_t = t;
         }
@@ -2100,7 +2099,7 @@ This should make the objects' order of visibility and their spherical shape more
 
 Both spheres appear quite dark and the bottom sphere fades to black where it meets the one on top.
 This makes sense since the center of the top sphere is exactly where $t = 1$. You can play with
-different ways to convert `closest_t` to a color. Here is a version that paints the scene gray and
+different ways to convert `closest_t` to a color. Here is a version that paints the spheres gray and
 brighter with increasing depth:
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
@@ -2279,7 +2278,7 @@ to a color value (in the $[0, 1]$ range):
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
       var closest_hit = Intersection(vec3(0.), FLT_MAX);
       for (var i = 0u; i < OBJECT_COUNT; i += 1u) {
-        let hit = intersect_sphere(ray, scene[i]);
+        let hit = intersect_sphere(ray, spheres[i]);
         if hit.t > 0. && hit.t < closest_hit.t {
           closest_hit = hit;
         }
@@ -2592,7 +2591,7 @@ shrink and expand:
       var closest_hit = Intersection(vec3(0.), FLT_MAX);
       for (var i = 0u; i < OBJECT_COUNT; i += 1u) {
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
-        var sphere = scene[i];
+        var sphere = spheres[i];
         sphere.radius += sin(f32(uniforms.frame_count) * 0.02) * 0.2;
         let hit = intersect_sphere(ray, sphere);
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
@@ -3026,8 +3025,8 @@ Now, let's update the shader:
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
     ...
     const OBJECT_COUNT: u32 = 2;
-    alias Scene = array<Sphere, OBJECT_COUNT>;
-    var<private> scene: Scene = Scene(
+    alias Spheres = array<Sphere, OBJECT_COUNT>;
+    var<private> spheres: Spheres = Spheres(
       Sphere(/*center*/ vec3(0., 0., -1.), /*radius*/ 0.5),
       Sphere(/*center*/ vec3(0., -100.5, -1.), /*radius*/ 100.),
     );
@@ -3053,7 +3052,7 @@ Now, let's update the shader:
       let ray = Ray(origin, direction);
       var closest_hit = Intersection(vec3(0.), FLT_MAX);
       for (var i = 0u; i < OBJECT_COUNT; i += 1u) {
-        var sphere = scene[i];
+        var sphere = spheres[i];
         sphere.radius += sin(f32(uniforms.frame_count) * 0.02) * 0.2;
         let hit = intersect_sphere(ray, sphere);
         if hit.t > 0. && hit.t < closest_hit.t {
@@ -3187,9 +3186,9 @@ Let's undo the animation and bring back the static spheres.
       var closest_hit = Intersection(vec3(0.), FLT_MAX);
       for (var i = 0u; i < OBJECT_COUNT; i += 1u) {
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
-        let sphere = scene[i];
+        let sphere = spheres[i];
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL delete
-        var sphere = scene[i];
+        var sphere = spheres[i];
         sphere.radius += sin(f32(uniforms.frame_count) * 0.02) * 0.2;
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
         let hit = intersect_sphere(ray, sphere);
@@ -3454,7 +3453,7 @@ new function responsible for traversing the scene and finding an intersection, c
     fn intersect_scene(ray: Ray) -> Intersection {
       var closest_hit = Intersection(vec3(0.), FLT_MAX);
       for (var i = 0u; i < OBJECT_COUNT; i += 1u) {
-        let sphere = scene[i];
+        let sphere = spheres[i];
         let hit = intersect_sphere(ray, sphere);
         if hit.t > 0. && hit.t < closest_hit.t {
           closest_hit = hit;
@@ -3821,8 +3820,8 @@ now, let's add an additional field to the `Sphere` structure to hold a shape's c
     }
     ...
     const OBJECT_COUNT: u32 = 2;
-    alias Scene = array<Sphere, OBJECT_COUNT>;
-    var<private> scene: Scene = Scene(
+    alias Spheres = array<Sphere, OBJECT_COUNT>;
+    var<private> spheres: Spheres = Spheres(
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
       Sphere(/*center*/ vec3(0., 0., -1.), /*radius*/ 0.5, /*color*/ vec3(0.5, 0.4, 0.)),
       Sphere(/*center*/ vec3(0., -100.5, -1.), /*radius*/ 100., /*color*/ vec3(0.7, 0.4, 0.6)),
@@ -3865,7 +3864,7 @@ intersection routine return the color of a sphere and use that color in the scat
       closest_hit.t = FLT_MAX;
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
       for (var i = 0u; i < OBJECT_COUNT; i += 1u) {
-        let sphere = scene[i];
+        let sphere = spheres[i];
         let hit = intersect_sphere(ray, sphere);
         if hit.t > 0. && hit.t < closest_hit.t {
           closest_hit = hit;
@@ -4399,7 +4398,8 @@ are always orthogonal to each other (i.e. the angle between any two axes is 90 d
 from the camera's point of view, $+x$ points towards the _right_, $+y$ points _up_, and $+z$ points
 _forward_.
 
-Let's define the scene-space orientation of the camera coordinate axes with 3 unit vectors:
+Let's define the scene space -- also called "world" space -- orientation of the camera coordinate
+axes with 3 unit vectors:
 $\vec{\textbf{u}}$ for $+x$, $\vec{\textbf{v}}$ for $+y$, and $\vec{\textbf{w}}$ for $+z$. These
 are the _basis vectors_ of the camera coordinate space. For example, our current camera orientation
 staring down the $-z$-axis of the scene coordinate space (with $+y$ pointing up), would
@@ -4411,9 +4411,9 @@ $\vec{\textbf{w}} = \begin{bmatrix} 0 \\ 0 \\ -1 \end{bmatrix}$.
    ](../images/fig-12-camera-basis-vectors.svg)
 
 These vectors establish a relationship between the two coordinate systems. Each basis vector
-tells us how to project the corresponding camera-space axis onto the scene-space axes. With this
+tells us how to project the corresponding camera-space axis onto the world-space axes. With this
 information, we can transform any vector defined in one space into the other. For example, we can
-rotate a ray direction vector defined in camera-space into the appropriate scene-space orientation
+rotate a ray direction vector defined in camera-space into the appropriate world-space orientation
 by multiplying it by this matrix:
 
   $$
@@ -4474,7 +4474,7 @@ $\vec{\textbf{w}}$.
 
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
-      // Compute the scene-space ray direction by rotating the camera-space vector into a new
+      // Compute the world-space ray direction by rotating the camera-space vector into a new
       // basis.
       let camera_rotation = mat3x3(uniforms.camera.u, uniforms.camera.v, uniforms.camera.w);
       let direction = camera_rotation * vec3(uv, focus_distance);
@@ -4997,8 +4997,8 @@ the camera:
     ...
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
     const OBJECT_COUNT: u32 = 4;
-    alias Scene = array<Sphere, OBJECT_COUNT>;
-    var<private> scene: Scene = Scene(
+    alias Spheres = array<Sphere, OBJECT_COUNT>;
+    var<private> spheres: Spheres = Spheres(
       Sphere(/*center*/ vec3(1., 0., -1.), /*radius*/ 0.5, /*color*/ vec3(0.5, 0.4, 0.)),
       Sphere(/*center*/ vec3(-1., 0., -1.), /*radius*/ 0.5, /*color*/ vec3(0.2, 0.5, 0.2)),
       Sphere(/*center*/ vec3(0., -1.1, -1.), /*radius*/ 0.5, /*color*/ vec3(0.7, 0.4, 0.6)),
@@ -5515,7 +5515,7 @@ there instead. We'll declare a separate array to store the `Material` instances 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
     const OBJECT_COUNT: u32 = 2;
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
-    alias Scene = array<Sphere, OBJECT_COUNT>;
+    alias Spheres = array<Sphere, OBJECT_COUNT>;
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
     alias Materials = array<Material, 1>;
 
@@ -5524,7 +5524,7 @@ there instead. We'll declare a separate array to store the `Material` instances 
     );
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
 
-    var<private> scene: Scene = Scene(
+    var<private> spheres: Spheres = Spheres(
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
       Sphere(/*center*/ vec3(0., 0.5, 0.), /*radius*/ 0.5, /*material_index*/ 0),
       Sphere(/*center*/ vec3(0.,  -2e2 - EPSILON, 0.), /*radius*/ 2e2, /*material_index*/ 0),
@@ -5559,7 +5559,7 @@ there instead. We'll declare a separate array to store the `Material` instances 
 Storing the material separately allows multiple `Sphere` instances to reference the same material.
 This reduces the overall required memory when the number of spheres exceeds the available materials.
 Another advantage is that it reduces the size of an individual `Sphere` which is better for memory
-access performance. Note that the `scene` array gets accessed far more frequently during the search
+access performance. Note that the `spheres` array gets accessed far more frequently during the search
 for an intersection while the `materials` array is only read once an intersection is found.
 
 Listing [materials-array] rearranges the scene to contain two spheres that use the same material,
@@ -5865,7 +5865,7 @@ with both types of material with various colors:
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
     const OBJECT_COUNT: u32 = 3;
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
-    alias Scene = array<Sphere, OBJECT_COUNT>;
+    alias Spheres = array<Sphere, OBJECT_COUNT>;
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
     alias Materials = array<Material, OBJECT_COUNT>;
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
@@ -5878,7 +5878,7 @@ with both types of material with various colors:
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
     );
 
-    var<private> scene: Scene = Scene(
+    var<private> spheres: Spheres = Spheres(
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
       Sphere(/*center*/ vec3(-0.6, 0.5, 0.), /*radius*/ 0.5, /*material_index*/ 0),
       Sphere(/*center*/ vec3(0.6, 0.5, 0.), /*radius*/ 0.5, /*material_index*/ 1),
@@ -5989,7 +5989,7 @@ to treat any material that has a non-zero `ior` parameter as transmissive and ig
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
     const OBJECT_COUNT: u32 = 4;
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
-    alias Scene = array<Sphere, OBJECT_COUNT>;
+    alias Spheres = array<Sphere, OBJECT_COUNT>;
     alias Materials = array<Material, OBJECT_COUNT>;
 
     var<private> materials: Materials = Materials(
@@ -6001,7 +6001,7 @@ to treat any material that has a non-zero `ior` parameter as transmissive and ig
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
     );
 
-    var<private> scene: Scene = Scene(
+    var<private> spheres: Spheres = Spheres(
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
       Sphere(/*center*/ vec3(-1.1, 0.5, 0.), /*radius*/ 0.5, /*material_index*/ 0),
       Sphere(/*center*/ vec3(0., 0.5, 0.),   /*radius*/ 0.5, /*material_index*/ 1),
@@ -6788,7 +6788,7 @@ the new spheres are in view:
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
     const OBJECT_COUNT: u32 = 7;
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
-    alias Scene = array<Sphere, OBJECT_COUNT>;
+    alias Spheres = array<Sphere, OBJECT_COUNT>;
     alias Materials = array<Material, OBJECT_COUNT>;
 
     var<private> materials: Materials = Materials(
@@ -6805,7 +6805,7 @@ the new spheres are in view:
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
     );
 
-    var<private> scene: Scene = Scene(
+    var<private> spheres: Spheres = Spheres(
       Sphere(/*center*/ vec3(-1.1, 0.5, 0.), /*radius*/ 0.5, /*material_index*/ 0),
       Sphere(/*center*/ vec3(0., 0.5, 0.),   /*radius*/ 0.5, /*material_index*/ 1),
       Sphere(/*center*/ vec3(1.1, 0.5, 0.),  /*radius*/ 0.5, /*material_index*/ 3),
@@ -7274,7 +7274,7 @@ off-white to detect any potential brightening:
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
     const OBJECT_COUNT: u32 = 6;
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
-    alias Scene = array<Sphere, OBJECT_COUNT>;
+    alias Spheres = array<Sphere, OBJECT_COUNT>;
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
     alias Materials = array<Material, 7>;
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
@@ -7292,7 +7292,7 @@ off-white to detect any potential brightening:
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
     );
 
-    var<private> scene: Scene = Scene(
+    var<private> spheres: Spheres = Spheres(
       Sphere(/*center*/ vec3(-1.1, 0.5, 0.), /*radius*/ 0.5, /*material_index*/ 0),
       Sphere(/*center*/ vec3(0., 0.5, 0.),   /*radius*/ 0.5, /*material_index*/ 1),
       Sphere(/*center*/ vec3(1.1, 0.5, 0.),  /*radius*/ 0.5, /*material_index*/ 3),
@@ -7494,7 +7494,7 @@ It is true that 0 <= u5 <= 1. Therefore the inequality holds as long as 0 <= C <
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
     const OBJECT_COUNT: u32 = 7;
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
-    alias Scene = array<Sphere, OBJECT_COUNT>;
+    alias Spheres = array<Sphere, OBJECT_COUNT>;
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
     alias Materials = array<Material, OBJECT_COUNT>;
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
@@ -7512,7 +7512,7 @@ It is true that 0 <= u5 <= 1. Therefore the inequality holds as long as 0 <= C <
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
     );
 
-    var<private> scene: Scene = Scene(
+    var<private> spheres: Spheres = Spheres(
       Sphere(/*center*/ vec3(-1.1, 0.5, 0.), /*radius*/ 0.5, /*material_index*/ 0),
       Sphere(/*center*/ vec3(0., 0.5, 0.),   /*radius*/ 0.5, /*material_index*/ 1),
       Sphere(/*center*/ vec3(1.1, 0.5, 0.),  /*radius*/ 0.5, /*material_index*/ 3),
@@ -7598,7 +7598,7 @@ Given its new meaning, it makes sense to rename `specular_or_ior` to `metallic_o
     }
 
     const OBJECT_COUNT: u32 = 7;
-    alias Scene = array<Sphere, OBJECT_COUNT>;
+    alias Spheres = array<Sphere, OBJECT_COUNT>;
     alias Materials = array<Material, OBJECT_COUNT>;
 
     var<private> materials: Materials = Materials(
@@ -7863,7 +7863,7 @@ and reposition the camera so that they are all in view:
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
     ...
     const OBJECT_COUNT: u32 = 7;
-    alias Scene = array<Sphere, OBJECT_COUNT>;
+    alias Spheres = array<Sphere, OBJECT_COUNT>;
     alias Materials = array<Material, OBJECT_COUNT>;
 
     var<private> materials: Materials = Materials(
@@ -7880,7 +7880,7 @@ and reposition the camera so that they are all in view:
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
     );
 
-    var<private> scene: Scene = Scene(
+    var<private> spheres: Spheres = Spheres(
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
       Sphere(/*center*/ vec3(0, 0.5, 1.6), /*radius*/ 0.5, /*material_index*/ 3),
       Sphere(/*center*/ vec3(-1.522, 0.5, 0.494),   /*radius*/ 0.5, /*material_index*/ 1),
@@ -7953,6 +7953,9 @@ The pinhole camera model projects all visible points in the scene onto a single 
 towards the center of the viewport) is large, the objects projected onto the image plane look more distorted.
 The wider the angle, the bigger the distortion.
 
+Vertical FOV
+------------
+
 The extent of a camera's visible range is called its _field of view_ (or _FOV_ for short). The FOV is measured
 in angles, so a camera with a visible range that spans the full range of directions side-to-side would have a
 FOV of 180 degrees. The widest angle between a camera a ray and the look vector in such a scenario would be
@@ -8019,7 +8022,7 @@ same result:
       uv = (uv - vec2(0.5)) * vec2(viewport_width, -viewport_height);
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
 
-      // Compute the scene-space ray direction by rotating the camera-space vector into a new
+      // Compute the world-space ray direction by rotating the camera-space vector into a new
       // basis.
     ...
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -8075,11 +8078,12 @@ Let's move the camera back a little:
 
 Now all spheres are in view and they no longer look distorted.
 
+Key Bindings
+------------
 
-Interactive FOV
----------------
-Let's turn the vertical field of view into a constant field of the `CameraUniforms` structure. This will
-allow us to adjust it interactively like the other camera parameters.
+Let's turn the vertical field of view
+into a constant field of the `CameraUniforms` structure. This will allow us to adjust it interactively
+like the other camera parameters.
 
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
@@ -8223,8 +8227,7 @@ decrement the vertical FOV by 1 degree:
 
   ![Figure [vid-10-fovy-up-and-down]: (video) Interactive FOV](../images/vid-10-fovy-up-and-down.mp4 autoplay muted loop)
 
-That feels like a real camera, doesn't it? Let's finally add a function to specify an optional initial FOV value
-during construction:
+Let's finally add a function to specify an optional initial FOV value during construction:
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
     ...
@@ -8276,6 +8279,294 @@ during construction:
     [Listing [reposition-camera-for-narrower-fov]: <kbd>[main.rs]</kbd>]
 </script>
 
+<!-- TODO: Add a footnote about zero-cost moves in Rust? -->
+
+Scene Builder
+=============
+The subject matter of a computer rendering is often called a _scene_. Just as the scene in a photograph
+is made of an arrangement of physical objects and lights, the scene in a computer rendering is made
+up of data, representing the shapes of objects, their positions, their surface materials, information
+about the camera, and so on.
+
+Our GPU program represents the content of the scene as two arrays that store a list of spheres and
+their associated materials. These are currently static declarations embedded in the WGSL code.
+Alternately the CPU side of our renderer can initialize the scene data and place it in dynamic
+memory where the GPU side can access it. This has some advantages like the ability to change the
+scene without needing to alter and re-compile the shader program. Unlike the GPU, the CPU also has
+access to the file system and can load and process scene data from a file, which enables us
+to render assets that were crafted using a modeling tool. The static data that can be embedded in a
+shader is typically limited to a few kilobytes,[^ch11-footnote1] while dynamic random-access memory
+(DRAM) can store hundreds of megabytes.
+
+We can repeat the pattern we used for the `Uniforms` struct: allocate two buffers, write the arrays
+of materials and spheres into them, and assign each buffer to a binding slot. We'll also add some
+utilities to aid in constructing a diverse set of scenes.
+
+Let's start with the `Material` type and its CPU-side representation. We'll introduce a new Rust
+module called `scene` by adding a new file at `src/scene.rs`:
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+    use bytemuck::{Pod, Zeroable};
+
+    use crate::algebra::Vec3;
+
+    #[derive(Debug, Copy, Clone, Pod, Zeroable)]
+    #[repr(C)]
+    pub struct Material {
+        color: Vec3,
+        metallic_or_ior: f32,
+    }
+
+    impl Material {
+        pub fn lambertian(color: Vec3) -> Self {
+            Self {
+                color,
+                metallic_or_ior: 0.,
+            }
+        }
+
+        pub fn opaque(color: Vec3, metallic: f32) -> Self {
+            Self {
+                color,
+                metallic_or_ior: metallic.max(0.00001),
+            }
+        }
+
+        pub fn transparent_dielectric(color: Vec3, ior: f32) -> Self {
+            Self {
+                color,
+                metallic_or_ior: -ior.abs(),
+            }
+        }
+
+        pub fn metal(color: Vec3) -> Self {
+            Self::opaque(color, 1.)
+        }
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [scene-module]: <kbd>[scene.rs]</kbd> The `scene` module and the `Material` type]
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+    mod algebra;
+    mod camera;
+    mod render;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+    mod scene;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+
+    const WIDTH: u32 = 800;
+    const HEIGHT: u32 = 600;
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [scene-module-decl]: <kbd>[main.rs]</kbd> Declare the `scene` module]
+
+The `Material` struct has the exact same memory layout as its WGSL counterpart. It also declares
+constructors that abstract away the 3 interpretations of `metallic_or_ior`.
+
+We will now introduce a new data structure called `SceneBuilder`. Think of this as a
+utility to keep track of scene data before it is ready for GPU access. Let's start by defining a
+method that adds a material to the scene and stores it in a collection that is internal to
+the `SceneBuilder`:
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    use bytemuck::{Pod, Zeroable};
+
+    use crate::algebra::Vec3;
+
+    #[derive(Debug, Copy, Clone, Pod, Zeroable)]
+    #[repr(C)]
+    pub struct Material {
+        color: Vec3,
+        metallic_or_ior: f32,
+    }
+
+    impl Material {
+        ...
+    }
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+    #[derive(Default)]
+    pub struct SceneBuilder {
+        materials: Vec<Material>,
+    }
+
+    impl SceneBuilder {
+        pub fn add_material(&mut self, material: Material) {
+            self.materials.push(material);
+        }
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [scene-builder-1]: <kbd>[scene.rs]</kbd> `SceneBuilder::add_material`]
+</script>
+
+`Vec` is a data structure defined in the Rust standard collection library
+([`std::collections`](https://doc.rust-lang.org/std/collections/index.html)) that stores its
+elements (in this case instances of `Material`) contiguously in memory.[^ch11-footnote2] The memory
+layout matches exactly how the shader program interprets a buffer binding, which means that we can
+copy the contents of the collection directly into the GPU buffer once it's allocated.
+
+Using our new utility, we can now recreate our existing material list on the CPU side:
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+    async fn main() -> Result<()> {
+        ...
+        let (device, queue, surface) = connect_to_gpu(&window).await?;
+        let mut renderer = render::PathTracer::new(device, queue, WIDTH, HEIGHT);
+        let mut camera = Camera::look_at(
+            Vec3::new(2.8577466, 5.002403, 3.9194741),
+            Vec3::new(0., 0., 0.),
+            Vec3::new(0., 1., 0.),
+        )
+        .with_fov(30_f32.to_radians());
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        let mut builder = SceneBuilder::default();
+        builder.add_material(Material::metal(Vec3::new(0.7, 0.5, 0.5)));
+        builder.add_material(Material::lambertian(Vec3::new(0.5, 0.5, 0.9)));
+        builder.add_material(Material::lambertian(Vec3::new(0.7, 0.9, 0.2)));
+        builder.add_material(Material::transparent_dielectric(Vec3::all(1.), /*ior*/1.5));
+        builder.add_material(Material::opaque(Vec3::new(0.3, 0.6, 0.9), /*metallic*/0.9));
+        builder.add_material(Material::opaque(Vec3::new(0.3, 0.9, 0.7), /*metallic*/0.3));
+        builder.add_material(Material::opaque(Vec3::new(0.9, 0.3, 0.7), /*metallic*/0.001));
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+
+        let mut left_mouse_button_pressed = false;
+        let mut right_mouse_button_pressed = false;
+        ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [materials-using-scene-builder]: <kbd>[main.rs]</kbd> Populating scene materials using `SceneBuilder`]
+</script>
+
+
+[^ch11-footnote1]: The WGSL specification limits this to 8 KB of data but implementations are
+allowed support more. See https://www.w3.org/TR/WGSL/#limits.
+
+[^ch11-footnote2]: This type of collection is sometimes called a "dynamic array". Many programming
+languages define a similar collection type. Notable examples are `std::vector` in C++, `Array` in Swift,
+and `ArrayList` in Java.
+
+
+Scene Bind Group
+----------------
+The next step is to replace the material array definition in the shader code with a buffer binding.
+WGSL requires a binding declaration to specify two indices: one for the bind group and
+one for the binding within the scope of the group. The three existing bindings (`uniforms`,
+`radiance_samples_old`, and `radiance_samples_new`) are declared in group $0$.
+
+Let's declare scene-related bindings in a separate bind group. It would be perfectly fine to add
+them to the same group but keeping them separate will simplify binding management when the renderer
+supports multiple scenes, each with a separate set of resources.
+
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    ...
+    const OBJECT_COUNT: u32 = 7;
+    alias Spheres = array<Sphere, OBJECT_COUNT>;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL delete
+    alias Materials = array<Material, OBJECT_COUNT>;
+
+    var<private> materials: Materials = Materials(
+      Material(/*color*/ vec3(0.7, 0.5, 0.5), /*metallic_or_ior*/1.),
+      Material(/*color*/ vec3(0.5, 0.5, 0.9), /*metallic_or_ior*/0.),
+      Material(/*color*/ vec3(0.7, 0.9, 0.2), /*metallic_or_ior*/0.),
+      Material(/*color*/ vec3(1.), /*metallic_or_ior*/-1.5),
+
+      Material(/*color*/ vec3(0.3, 0.6, 0.9), /*metallic_or_ior*/0.9),
+      Material(/*color*/ vec3(0.3, 0.9, 0.7), /*metallic_or_ior*/0.3),
+      Material(/*color*/ vec3(0.9, 0.3, 0.7), /*metallic_or_ior*/0.001),
+    );
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+    @group(1) @binding(0) var<storage> materials: array<Material>;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+
+    var<private> spheres: Spheres = Spheres(
+      Sphere(/*center*/ vec3(0, 0.5, 1.6), /*radius*/ 0.5, /*material_index*/ 3),
+      Sphere(/*center*/ vec3(-1.522, 0.5, 0.494),   /*radius*/ 0.5, /*material_index*/ 1),
+      Sphere(/*center*/ vec3(0., 0.7, 0.),  /*radius*/ 0.7, /*material_index*/ 0),
+
+      Sphere(/*center*/ vec3(-0.941, 0.5, -1.294), /*radius*/ 0.5, /*material_index*/ 4),
+      Sphere(/*center*/ vec3(0.941, 0.5, -1.294),   /*radius*/ 0.5, /*material_index*/ 5),
+      Sphere(/*center*/ vec3(1.522, 0.5, 0.494),  /*radius*/ 0.5, /*material_index*/ 6),
+
+      // Ground
+      Sphere(/*center*/ vec3(0., -2e2 - EPSILON, 0.), /*radius*/ 2e2, /*material_index*/ 2),
+    );
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [materials-buffer-binding]: <kbd>[shaders.wgsl]</kbd> The `materials` buffer binding]
+</script>
+
+Unlike the existing `uniforms` binding, the new declaration for `materials` specifies `var<storage>`
+instead of `var<uniform>`. The `storage` and `uniform` keywords represent two memory _address spaces_
+that allow data to be shared between the host (i.e. CPU) and the GPU. Their main difference is
+memory access performance and constraints on program behavior.
+
+In a CPU program each thread executes an independent flow of instructions and a CPU core
+runs only one thread at a time. In contrast, a GPU core executes thousands of threads at once.
+Threads run in groups that execute the same sequence of instructions in lockstep, though each thread
+is allowed to read from different memory locations and operate on variables that contain different
+values.[^ch11-footnote3] The memory access pattern is _uniform_ when threads in a group read from
+the exact same memory location.
+
+Data access patterns have a large impact on GPU performance. Accessing main application memory
+(sometimes called "global memory") is slow and can lead to bottlenecks, since it can take many
+instruction cycles to fully execute a memory read. While a memory read is in progress the
+hardware can typically schedule other work to stay busy. However frequent memory requests
+can cause the hardware to spend most of its time waiting for data instead of doing useful work.
+To reduce such bottlenecks, processor architectures employ memory caches where they store copies
+of frequently accessed data. A cache is much smaller than main memory but accessing it can be
+hundreds of times faster.
+
+Compared to a CPU there is typically a lot less cache space available for a GPU thread, because
+thousands of threads have to share the caches simulatenously. Caches are utilized most effectively
+when threads in a group access similar memory locations, since data that is closely located in
+memory can be fetched and stored in the cache using fewer main memory reads. Utilization can reach
+optimal when the memory accesses are uniform, when the same data gets shared across all threads.
+
+At a high-level, a buffer in the _uniform_ address space is optimized for small read-only data
+that is uniformly accessed by GPU threads, while _storage_ is intended for large amounts of data
+and supports random access.[^ch11-footnote4] In practice, the performance differences vary
+across GPU architectures. Some architectures store uniform data in highly-cached special hardware
+blocks that are very fast when accessed uniformly but may incur a large penalty if access is not
+uniform (notably on NVIDIA). On some newer GPUs the performance distinction between uniform and
+storage memory is smaller (such as Apple M-series GPUs that use a unified memory architecture).
+
+There are two main reasons for choosing the storage address space for our scene buffers. The first
+reason is that the path tracing algorithm that we are implementing involves highly divergent memory
+accesses. We have assigned each pixel to process one light transport path per pixel. Rays that are
+traced after a diffuse scatter are likely to intersect very different objects in the scene since
+they get sampled over a broad range of directions. This means that we can't guarantee uniform access
+to the materials buffer even for threads that process adjacent pixels.[^ch11-footnote5]
+
+The second reason has to do with restrictions imposed by WebGPU. The uniform address space requires
+the size of the buffer to be known at compile time, so a fixed-sized array declaration
+like `<script type='preformatted'>array<Materials, 7></script>` is permitted. When the size is
+omitted (as we have in Listing [materials-buffer-binding]), the size of the bound buffer is
+determined at runtime. This provides a lot of flexibility as each scene can be stored in a
+separate buffer that is sized according to its contents. This also forces us to use the storage
+address space.
+
+
+[^ch11-footnote3]: The GPU execution model is called "Single Instruction, Multiple Threads" (SIMT),
+a variant of "Single Instruction, Multiple Data" (SIMD).
+
+[^ch11-footnote4]: Graphics APIs use different terms for the same notion of address space. OpenGL and
+Vulkan use the _uniform_ and _storage_ terms in the same way as WebGPU. NVIDIA's CUDA and Apple's
+Metal API both use the term _constant_ instead of uniform, but use different terms for
+storage (CUDA calls it _global_ while Metal calls it _device_).
+
+[^ch11-footnote5]: Improving the coherency of memory accesses is a big challenge with ray tracing and
+remains an important GPU optimization topic.
 
 
                                (insert acknowledgments.md.html here)

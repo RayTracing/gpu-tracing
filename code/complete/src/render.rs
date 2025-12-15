@@ -12,8 +12,8 @@ pub struct PathTracer {
     uniforms: Uniforms,
     uniform_buffer: wgpu::Buffer,
 
-    display_pipeline: wgpu::RenderPipeline,
-    display_bind_groups: [wgpu::BindGroup; 2],
+    pipeline: wgpu::RenderPipeline,
+    render_bind_groups: [wgpu::BindGroup; 2],
 }
 
 #[derive(Copy, Clone, Pod, Zeroable)]
@@ -38,8 +38,8 @@ impl PathTracer {
         }));
 
         let shader_module = compile_shader_module(&device);
-        let (display_pipeline, display_layout) =
-            create_display_pipeline(&device, &shader_module);
+        let (pipeline, render_group_layout, scene_group_layout) =
+            create_pipeline(&device, &shader_module);
 
         // Initialize the uniform buffer.
         let uniforms = Uniforms {
@@ -57,9 +57,9 @@ impl PathTracer {
         });
 
         let radiance_samples = create_sample_textures(&device, width, height);
-        let display_bind_groups = create_display_bind_groups(
+        let render_bind_groups = create_render_bind_groups(
             &device,
-            &display_layout,
+            &render_group_layout,
             &radiance_samples,
             &uniform_buffer,
         );
@@ -69,8 +69,8 @@ impl PathTracer {
             queue,
             uniforms,
             uniform_buffer,
-            display_pipeline,
-            display_bind_groups,
+            pipeline,
+            render_bind_groups,
         }
     }
 
@@ -91,7 +91,7 @@ impl PathTracer {
             });
 
         let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("display pass"),
+            label: Some("path tracer render pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view: target,
                 depth_slice: None,
@@ -104,10 +104,10 @@ impl PathTracer {
             ..Default::default()
         });
 
-        render_pass.set_pipeline(&self.display_pipeline);
+        render_pass.set_pipeline(&self.pipeline);
         render_pass.set_bind_group(
             0,
-            &self.display_bind_groups[(self.uniforms.frame_count % 2) as usize],
+            &self.render_bind_groups[(self.uniforms.frame_count % 2) as usize],
             &[],
         );
 
@@ -132,11 +132,11 @@ fn compile_shader_module(device: &wgpu::Device) -> wgpu::ShaderModule {
     })
 }
 
-fn create_display_pipeline(
+fn create_pipeline(
     device: &wgpu::Device,
     shader_module: &wgpu::ShaderModule,
-) -> (wgpu::RenderPipeline, wgpu::BindGroupLayout) {
-    let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+) -> (wgpu::RenderPipeline, wgpu::BindGroupLayout, wgpu::BindGroupLayout) {
+    let render_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: None,
         entries: &[
             wgpu::BindGroupLayoutEntry {
@@ -171,11 +171,24 @@ fn create_display_pipeline(
             },
         ],
     });
+    let scene_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("scene resource layout"),
+        entries: &[wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        }],
+    });
     let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("display"),
+        label: Some("path tracer"),
         layout: Some(
             &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                bind_group_layouts: &[&bind_group_layout],
+                bind_group_layouts: &[&render_group_layout, &scene_group_layout],
                 ..Default::default()
             }),
         ),
@@ -187,13 +200,13 @@ fn create_display_pipeline(
         },
         vertex: wgpu::VertexState {
             module: shader_module,
-            entry_point: Some("display_vs"),
+            entry_point: Some("path_tracer_vs"),
             compilation_options: Default::default(),
             buffers: &[],
         },
         fragment: Some(wgpu::FragmentState {
             module: shader_module,
-            entry_point: Some("display_fs"),
+            entry_point: Some("path_tracer_fs"),
             compilation_options: Default::default(),
             targets: &[Some(wgpu::ColorTargetState {
                 format: wgpu::TextureFormat::Bgra8Unorm,
@@ -206,7 +219,7 @@ fn create_display_pipeline(
         multiview: None,
         cache: None,
     });
-    (pipeline, bind_group_layout)
+    (pipeline, render_group_layout, scene_group_layout)
 }
 
 fn create_sample_textures(
@@ -232,7 +245,7 @@ fn create_sample_textures(
     [device.create_texture(&desc), device.create_texture(&desc)]
 }
 
-fn create_display_bind_groups(
+fn create_render_bind_groups(
     device: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
     textures: &[wgpu::Texture; 2],

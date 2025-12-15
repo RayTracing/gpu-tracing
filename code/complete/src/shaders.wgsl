@@ -138,7 +138,7 @@ fn intersect_scene(ray: Ray) -> Intersection {
   var closest_hit = no_intersection();
   closest_hit.t = FLT_MAX;
   for (var i = 0u; i < OBJECT_COUNT; i += 1u) {
-    let sphere = scene[i];
+    let sphere = spheres[i];
     let hit = intersect_sphere(ray, sphere);
     if hit.t > 0. && hit.t < closest_hit.t {
       closest_hit = hit;
@@ -253,21 +253,11 @@ fn sky_color(ray: Ray) -> vec3f {
 }
 
 const OBJECT_COUNT: u32 = 7;
-alias Scene = array<Sphere, OBJECT_COUNT>;
-alias Materials = array<Material, OBJECT_COUNT>;
+alias Spheres = array<Sphere, OBJECT_COUNT>;
 
-var<private> materials: Materials = Materials(
-  Material(/*color*/ vec3(0.7, 0.5, 0.5), /*metallic_or_ior*/1.),
-  Material(/*color*/ vec3(0.5, 0.5, 0.9), /*metallic_or_ior*/0.),
-  Material(/*color*/ vec3(0.7, 0.9, 0.2), /*metallic_or_ior*/0.),
-  Material(/*color*/ vec3(1.), /*metallic_or_ior*/-1.5),
+@group(1) @binding(0) var<storage> materials: array<Material>;
 
-  Material(/*color*/ vec3(0.3, 0.6, 0.9), /*metallic_or_ior*/0.9),
-  Material(/*color*/ vec3(0.3, 0.9, 0.7), /*metallic_or_ior*/0.3),
-  Material(/*color*/ vec3(0.9, 0.3, 0.7), /*metallic_or_ior*/0.001),
-);
-
-var<private> scene: Scene = Scene(
+var<private> spheres: Spheres = Spheres(
   Sphere(/*center*/ vec3(0, 0.5, 1.6), /*radius*/ 0.5, /*material_index*/ 3),
   Sphere(/*center*/ vec3(-1.522, 0.5, 0.494),   /*radius*/ 0.5, /*material_index*/ 1),
   Sphere(/*center*/ vec3(0., 0.7, 0.),  /*radius*/ 0.7, /*material_index*/ 0),
@@ -293,11 +283,11 @@ var<private> vertices: TriangleVertices = TriangleVertices(
   vec2f( 1.0, -1.0),
 );
 
-@vertex fn display_vs(@builtin(vertex_index) vid: u32) -> @builtin(position) vec4f {
+@vertex fn path_tracer_vs(@builtin(vertex_index) vid: u32) -> @builtin(position) vec4f {
   return vec4f(vertices[vid], 0.0, 1.0);
 }
 
-@fragment fn display_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+@fragment fn path_tracer_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
   init_rng(vec2u(pos.xy));
 
   let origin = uniforms.camera.origin;
@@ -314,7 +304,7 @@ var<private> vertices: TriangleVertices = TriangleVertices(
   // Map `uv` from y-down normalized coordinates to scaled NDC viewport.
   uv = (uv - vec2(0.5)) * vec2(viewport_width, -viewport_height);
 
-  // Compute the scene-space ray direction by rotating the camera-space vector into a new
+  // Compute the world-space ray direction by rotating the camera-space vector into a new
   // basis.
   let camera_rotation = mat3x3(uniforms.camera.u, uniforms.camera.v, uniforms.camera.w);
   let direction = camera_rotation * vec3(uv, focus_distance);
