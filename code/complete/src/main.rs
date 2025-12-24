@@ -18,7 +18,7 @@ mod scene;
 use crate::{
     algebra::Vec3,
     camera::Camera,
-    scene::{Material, SceneBuilder},
+    scene::{Material, SceneBuilder, Sphere},
 };
 
 const WIDTH: u32 = 1600;
@@ -43,15 +43,8 @@ async fn main() -> Result<()> {
     )
     .with_fov(30_f32.to_radians());
 
-    let mut builder = SceneBuilder::default();
-    builder.add_material(Material::metal(Vec3::new(0.7, 0.5, 0.5)));
-    builder.add_material(Material::lambertian(Vec3::new(0.5, 0.5, 0.9)));
-    builder.add_material(Material::lambertian(Vec3::new(0.7, 0.9, 0.2)));
-    builder.add_material(Material::transparent_dielectric(Vec3::all(1.), /*ior*/ 1.5));
-    builder.add_material(Material::opaque(Vec3::new(0.3, 0.6, 0.9), /*metallic*/ 0.9));
-    builder.add_material(Material::opaque(Vec3::new(0.3, 0.9, 0.7), /*metallic*/ 0.3));
-    builder.add_material(Material::opaque(Vec3::new(0.9, 0.3, 0.7), /*metallic*/ 0.001));
-    let scene_resources = builder.build(renderer.device(), renderer.scene_group_layout());
+    let scene_resources =
+        first_scene().build(renderer.device(), renderer.scene_group_layout());
 
     let mut left_mouse_button_pressed = false;
     let mut right_mouse_button_pressed = false;
@@ -107,6 +100,7 @@ async fn main() -> Result<()> {
                         .texture
                         .create_view(&wgpu::TextureViewDescriptor::default());
 
+                    //println!("{camera:?}");
                     renderer.render_frame(&camera, &scene_resources, &render_target);
 
                     frame.present();
@@ -195,4 +189,40 @@ async fn connect_to_gpu(
     surface.configure(&device, &config);
 
     Ok((device, queue, surface))
+}
+
+fn first_scene() -> SceneBuilder {
+    let mut builder = SceneBuilder::default();
+
+    let glass = builder.add_material(Material::transparent_dielectric(Vec3::all(1.), 1.5));
+    let diffuse = builder.add_material(Material::lambertian(Vec3::new(0.5, 0.5, 0.9)));
+    let metal = builder.add_material(Material::metal(Vec3::new(0.7, 0.5, 0.5)));
+    let cornflower = builder.add_material(Material::opaque(Vec3::new(0.3, 0.6, 0.9), 0.9));
+    let turquoise = builder.add_material(Material::opaque(Vec3::new(0.3, 0.9, 0.7), 0.3));
+    let magenta = builder.add_material(Material::opaque(Vec3::new(0.9, 0.3, 0.7), 0.001));
+    let ground = builder.add_material(Material::lambertian(Vec3::new(0.7, 0.9, 0.2)));
+
+    builder.add_sphere(Sphere { center: Vec3::new(0., 0.5, 1.6), radius: 0.5 }, glass);
+    builder.add_sphere(Sphere { center: Vec3::new(0., 0.7, 0.), radius: 0.7 }, metal);
+    builder.add_sphere(
+        Sphere { center: Vec3::new(-1.522, 0.5, 0.494), radius: 0.5 },
+        diffuse
+    );
+    builder.add_sphere(
+        Sphere { center: Vec3::new(-0.941, 0.5, -1.294), radius: 0.5 },
+        cornflower
+    );
+    builder.add_sphere(
+        Sphere { center: Vec3::new(0.941, 0.5, -1.294), radius: 0.5 },
+        turquoise
+    );
+    builder.add_sphere(
+        Sphere { center: Vec3::new(1.522, 0.5, 0.494), radius: 0.5 },
+        magenta
+    );
+
+    // Ground
+    builder.add_sphere(Sphere { center: Vec3::new(0., -200.001, 0.), radius: 200. }, ground);
+
+    builder
 }

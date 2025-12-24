@@ -20,11 +20,9 @@ struct CameraUniforms {
   origin: vec3f,
   fov_y: f32,
   u: vec3f,
-  focus_distance: f32,
+  // TODO: focus_distance: f32,
   v: vec3f,
   w: vec3f,
-  //viewport_width: f32,
-  //viewport_height: f32,
 }
 
 struct Rng {
@@ -137,7 +135,7 @@ fn intersect_sphere(ray: Ray, sphere: Sphere) -> Intersection {
 fn intersect_scene(ray: Ray) -> Intersection {
   var closest_hit = no_intersection();
   closest_hit.t = FLT_MAX;
-  for (var i = 0u; i < OBJECT_COUNT; i += 1u) {
+  for (var i = 0u; i < arrayLength(&spheres); i += 1u) {
     let sphere = spheres[i];
     let hit = intersect_sphere(ray, sphere);
     if hit.t > 0. && hit.t < closest_hit.t {
@@ -252,23 +250,8 @@ fn sky_color(ray: Ray) -> vec3f {
   return (1. - t) * vec3(1.) + t * vec3(0.3, 0.5, 1.);
 }
 
-const OBJECT_COUNT: u32 = 7;
-alias Spheres = array<Sphere, OBJECT_COUNT>;
-
 @group(1) @binding(0) var<storage> materials: array<Material>;
-
-var<private> spheres: Spheres = Spheres(
-  Sphere(/*center*/ vec3(0, 0.5, 1.6), /*radius*/ 0.5, /*material_index*/ 3),
-  Sphere(/*center*/ vec3(-1.522, 0.5, 0.494),   /*radius*/ 0.5, /*material_index*/ 1),
-  Sphere(/*center*/ vec3(0., 0.7, 0.),  /*radius*/ 0.7, /*material_index*/ 0),
-
-  Sphere(/*center*/ vec3(-0.941, 0.5, -1.294), /*radius*/ 0.5, /*material_index*/ 4),
-  Sphere(/*center*/ vec3(0.941, 0.5, -1.294),   /*radius*/ 0.5, /*material_index*/ 5),
-  Sphere(/*center*/ vec3(1.522, 0.5, 0.494),  /*radius*/ 0.5, /*material_index*/ 6),
-
-  // Ground
-  Sphere(/*center*/ vec3(0., -2e2 - EPSILON, 0.), /*radius*/ 2e2, /*material_index*/ 2),
-);
+@group(1) @binding(1) var<storage> spheres: array<Sphere>;
 
 @group(0) @binding(1) var radiance_samples_old: texture_2d<f32>;
 @group(0) @binding(2) var radiance_samples_new: texture_storage_2d<rgba32float, write>;

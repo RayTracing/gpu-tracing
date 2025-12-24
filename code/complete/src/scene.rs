@@ -39,19 +39,42 @@ impl Material {
     }
 }
 
-// TODO:
+pub struct Sphere {
+    pub center: Vec3,
+    pub radius: f32,
+}
+
+#[derive(Debug, Copy, Clone, Pod, Zeroable)]
+#[repr(C)]
+struct SphereBufferEntry {
+    center: Vec3,
+    radius: f32,
+    material_index: u32,
+    _pad: [u32; 3],
+}
+
 pub struct MaterialId(u32);
 
 #[derive(Default)]
 pub struct SceneBuilder {
     materials: Vec<Material>,
+    spheres: Vec<SphereBufferEntry>,
 }
 
 impl SceneBuilder {
-    pub fn add_material(&mut self, material: Material) {
-        // TODO: -> MaterialId {
+    pub fn add_material(&mut self, material: Material) -> MaterialId {
         self.materials.push(material);
-        // TODO: MaterialId((self.materials.len() - 1).try_into().unwrap())
+        MaterialId((self.materials.len() - 1).try_into().unwrap())
+    }
+
+    pub fn add_sphere(&mut self, sphere: Sphere, material: MaterialId) {
+        let entry = SphereBufferEntry {
+            center: sphere.center,
+            radius: sphere.radius,
+            material_index: material.0,
+            _pad: [0; 3],
+        };
+        self.spheres.push(entry)
     }
 
     pub fn build(
@@ -59,32 +82,54 @@ impl SceneBuilder {
         device: &wgpu::Device,
         layout: &wgpu::BindGroupLayout,
     ) -> wgpu::BindGroup {
-        // Create the buffer already mapped and initialize data without an explicit transfer.
-        let material_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("materials"),
-            size: (std::mem::size_of::<Material>() * self.materials.len()) as u64,
-            usage: wgpu::BufferUsages::STORAGE,
-            mapped_at_creation: true,
-        });
-        // Copy the data into the buffer.
-        {
-            let mut view = material_buffer.slice(..).get_mapped_range_mut();
-            view.as_mut()
-                .copy_from_slice(bytemuck::cast_slice(self.materials.as_slice()));
-        }
-        material_buffer.unmap();
+        let material_buffer =
+            create_storage_buffer_with_data(device, &self.materials, Some("materials"));
+        let spheres_buffer =
+            create_storage_buffer_with_data(device, &self.spheres, Some("spheres"));
 
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("scene resources"),
             layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: &material_buffer,
-                    offset: 0,
-                    size: None,
-                }),
-            }],
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &material_buffer,
+                        offset: 0,
+                        size: None,
+                    }),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &spheres_buffer,
+                        offset: 0,
+                        size: None,
+                    }),
+                },
+            ],
         })
     }
+}
+
+fn create_storage_buffer_with_data<T: Pod>(
+    device: &wgpu::Device,
+    data: &Vec<T>,
+    label: Option<&str>,
+) -> wgpu::Buffer {
+    // Create the buffer already mapped and initialize data without an explicit transfer.
+    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label,
+        size: (std::mem::size_of::<T>() * data.len()) as u64,
+        usage: wgpu::BufferUsages::STORAGE,
+        mapped_at_creation: true,
+    });
+    // Copy the data into the buffer.
+    {
+        let mut view = buffer.slice(..).get_mapped_range_mut();
+        view.as_mut()
+            .copy_from_slice(bytemuck::cast_slice(data.as_slice()));
+    }
+    buffer.unmap();
+    buffer
 }

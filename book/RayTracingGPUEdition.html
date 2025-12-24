@@ -506,7 +506,7 @@ error:
 
 I like to keep things simple in my code examples and use the `?` operator. Instead of defining
 custom error types and conversions, I use a catch all `Error` type from a library called *anyhow*.
-You'll often see the examples include `anyhow::Result` (an alias for `Result<&#xFEFF;, anyhow::Error>`)
+You'll often see the examples include `anyhow::Result<&#xFEFF;T>` (an alias for `Result<&#xFEFF;T, anyhow::Error>`)
 and `anyhow::Context`. The latter is a useful trait for adding an error message while converting to
 an `anyhow::Error`:
 
@@ -8697,16 +8697,18 @@ algorithm) and "scene bind group":
         let scene_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("scene resource layout"),
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
                     },
-                    count: None,
-                }],
+                  ],
             });
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -8807,14 +8809,16 @@ called `build`, which writes the scene data to buffers and assigns them to a bin
             device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("scene resources"),
                 layout,
-                entries: &[wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                        buffer: &material_buffer,
-                        offset: 0,
-                        size: None,
-                    }),
-                }],
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &material_buffer,
+                            offset: 0,
+                            size: None,
+                        }),
+                    },
+                ],
             })
         }
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
@@ -9005,8 +9009,6 @@ to access the GPU device and the scene bind group layout:
     [Listing [main-build-scene]: <kbd>[main.rs]</kbd> Create and use the scene resources]
 </script>
 
-Running the program now should result in the same rendering as before.
-
 
 [^ch11-footnote3]: The GPU execution model is called "Single Instruction, Multiple Threads" (SIMT),
 a variant of "Single Instruction, Multiple Data" (SIMD).
@@ -9024,6 +9026,355 @@ reference as usual. This means that `SceneBuilder::build` consumes the `SceneBui
 gets invoked with, so a builder cannot be used after a call to `build`. This is a design choice but
 it would also be OK to declare this parameter as `&self` and allow a builder exist beyond a single
 build.
+
+
+Sphere Buffer
+-------------
+Let's repeat these steps for the `spheres` array. We start by adding the binding declaration and
+extending the bind group layout:
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    ...
+    const OBJECT_COUNT: u32 = 7;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL delete
+    alias Spheres = array<Sphere, OBJECT_COUNT>;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+
+    @group(1) @binding(0) var<storage> materials: array<Material>;
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL delete
+    var<private> spheres: Spheres = Spheres(
+      Sphere(/*center*/ vec3(0, 0.5, 1.6), /*radius*/ 0.5, /*material_index*/ 3),
+      Sphere(/*center*/ vec3(-1.522, 0.5, 0.494),   /*radius*/ 0.5, /*material_index*/ 1),
+      Sphere(/*center*/ vec3(0., 0.7, 0.),  /*radius*/ 0.7, /*material_index*/ 0),
+
+      Sphere(/*center*/ vec3(-0.941, 0.5, -1.294), /*radius*/ 0.5, /*material_index*/ 4),
+      Sphere(/*center*/ vec3(0.941, 0.5, -1.294),   /*radius*/ 0.5, /*material_index*/ 5),
+      Sphere(/*center*/ vec3(1.522, 0.5, 0.494),  /*radius*/ 0.5, /*material_index*/ 6),
+
+      // Ground
+      Sphere(/*center*/ vec3(0., -2e2 - EPSILON, 0.), /*radius*/ 2e2, /*material_index*/ 2),
+    );
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+    @group(1) @binding(1) var<storage> spheres: array<Sphere>;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [spheres-buffer-binding]: <kbd>[shaders.wgsl]</kbd> The `spheres` buffer binding]
+</script>
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+    fn create_pipeline(
+        device: &wgpu::Device,
+        shader_module: &wgpu::ShaderModule,
+    ) -> (wgpu::RenderPipeline, wgpu::BindGroupLayout, wgpu::BindGroupLayout) {
+        ...
+        let scene_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("scene resource layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+                  ],
+            });
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        ...
+    }
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [spheres-bind-group-entry]: <kbd>[render.rs]</kbd> The `spheres` buffer binding]
+</script>
+
+Let's extend `SceneBuilder` with a new `add_sphere` method and add logic to dynamically
+initialize a buffer during `build`:
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+    pub struct Sphere {
+        pub center: Vec3,
+        pub radius: f32,
+    }
+
+    #[derive(Debug, Copy, Clone, Pod, Zeroable)]
+    #[repr(C)]
+    struct SphereBufferEntry {
+        center: Vec3,
+        radius: f32,
+        material_index: u32,
+        _pad: [u32; 3],
+    }
+
+    pub struct MaterialId(u32);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+
+    #[derive(Default)]
+    pub struct SceneBuilder {
+        materials: Vec<Material>,
+    }
+
+    impl SceneBuilder {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        pub fn add_material(&mut self, material: Material) -> MaterialId {
+            self.materials.push(material);
+            MaterialId((self.materials.len() - 1).try_into().unwrap())
+        }
+
+        pub fn add_sphere(&mut self, sphere: Sphere, material: MaterialId) {
+            let entry = SphereBufferEntry {
+                center: sphere.center,
+                radius: sphere.radius,
+                material_index: material.0,
+                _pad: [0; 3],
+            };
+            self.spheres.push(entry)
+        }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+
+        pub fn build(
+            self,
+            device: &wgpu::Device,
+            layout: &wgpu::BindGroupLayout,
+        ) -> wgpu::BindGroup {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        let material_buffer =
+            create_storage_buffer_with_data(device, &self.materials, Some("materials"));
+        let spheres_buffer =
+            create_storage_buffer_with_data(device, &self.spheres, Some("spheres"));
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("scene resources"),
+                layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &material_buffer,
+                            offset: 0,
+                            size: None,
+                        }),
+                    },
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &spheres_buffer,
+                            offset: 0,
+                            size: None,
+                        }),
+                    },
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+                ],
+            })
+        }
+    }
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+    fn create_storage_buffer_with_data<T: Pod>(
+        device: &wgpu::Device,
+        data: &Vec<T>,
+        label: Option<&str>,
+    ) -> wgpu::Buffer {
+        // Create the buffer already mapped and initialize data without an explicit transfer.
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label,
+            size: (std::mem::size_of::<T>() * data.len()) as u64,
+            usage: wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: true,
+        });
+        // Copy the data into the buffer.
+        {
+            let mut view = buffer.slice(..).get_mapped_range_mut();
+            view.as_mut()
+                .copy_from_slice(bytemuck::cast_slice(data.as_slice()));
+        }
+        buffer.unmap();
+        buffer
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [scene-builder-build-with-spheres]: <kbd>[scene.rs]</kbd> `SceneBuilder::add_sphere`]
+</script>
+
+Let's go over the changes:
+
+* We added two distinct types to represent a sphere: `Sphere` and `SphereBufferEntry`.
+  `SphereBufferEntry` corresponds to the data seen by the GPU and accounts for the padding
+  required to satisfy the layout rules. `Sphere` is a user-friendly struct that hides that
+  detail, so that a user of `SceneBuilder::add_sphere` doesn't need to worry about
+  initializing the padding.
+
+* The `MaterialId` type is a _tuple-struct_ that wraps a 32-bit unsigned integer index into
+  the `materials` buffer. `SceneBuilder::add_material` now returns the index of the last
+  inserted material as a `MaterialId` and `add_sphere` takes one as input.
+
+  We could have represented the material index directly as `u32` but that would introduce
+  ambiguity since any integer value (including invalid ones) could be passed as an argument to
+  `add_spheres`. `MaterialId` guards against potential programmer errors by enforcing a strong
+  type around the buffer index. Since its `u32` member is private, code that lives outside the
+  `scene` module must obtain a valid `MaterialId` by calling `SceneBuilder::add_material`.
+
+* The buffer allocation code is now defined in a new `create_storage_buffer_with_data` function.
+  The function is generic over any collection of type `Vec&amp;lt&#xFEFF;T&amp;gt`, only requiring
+  that `T` implement the `bytemuck::Pod` trait.
+
+We can now specify the entire scene using `SceneBuilder`. We'll move the scene construction code
+into its own function to keep things tidy:
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+    async fn main() -> Result<()> {
+        ...
+        let (device, queue, surface) = connect_to_gpu(&window).await?;
+        let mut renderer = render::PathTracer::new(device, queue, WIDTH, HEIGHT);
+        let mut camera = Camera::look_at(
+            Vec3::new(2.8577466, 5.002403, 3.9194741),
+            Vec3::new(0., 0., 0.),
+            Vec3::new(0., 1., 0.),
+        )
+        .with_fov(30_f32.to_radians());
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust delete
+        let mut builder = SceneBuilder::default();
+        builder.add_material(Material::metal(Vec3::new(0.7, 0.5, 0.5)));
+        builder.add_material(Material::lambertian(Vec3::new(0.5, 0.5, 0.9)));
+        builder.add_material(Material::lambertian(Vec3::new(0.7, 0.9, 0.2)));
+        builder.add_material(Material::transparent_dielectric(Vec3::all(1.), /*ior*/1.5));
+        builder.add_material(Material::opaque(Vec3::new(0.3, 0.6, 0.9), /*metallic*/0.9));
+        builder.add_material(Material::opaque(Vec3::new(0.3, 0.9, 0.7), /*metallic*/0.3));
+        builder.add_material(Material::opaque(Vec3::new(0.9, 0.3, 0.7), /*metallic*/0.001));
+        let scene_resources = builder.build(renderer.device(), renderer.scene_group_layout());
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        let scene_resources =
+            first_scene().build(renderer.device(), renderer.scene_group_layout());
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+
+        let mut left_mouse_button_pressed = false;
+        let mut right_mouse_button_pressed = false;
+        ...
+    }
+    ...
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+    fn first_scene() -> SceneBuilder {
+        let mut builder = SceneBuilder::default();
+
+        let glass = builder.add_material(Material::transparent_dielectric(Vec3::all(1.), 1.5));
+        let diffuse = builder.add_material(Material::lambertian(Vec3::new(0.5, 0.5, 0.9)));
+        let metal = builder.add_material(Material::metal(Vec3::new(0.7, 0.5, 0.5)));
+        let cornflower = builder.add_material(Material::opaque(Vec3::new(0.3, 0.6, 0.9), 0.9));
+        let turquoise = builder.add_material(Material::opaque(Vec3::new(0.3, 0.9, 0.7), 0.3));
+        let magenta = builder.add_material(Material::opaque(Vec3::new(0.9, 0.3, 0.7), 0.001));
+        let ground = builder.add_material(Material::lambertian(Vec3::new(0.7, 0.9, 0.2)));
+
+        builder.add_sphere(Sphere { center: Vec3::new(0., 0.5, 1.6), radius: 0.5 }, glass);
+        builder.add_sphere(Sphere { center: Vec3::new(0., 0.7, 0.), radius: 0.7 }, metal);
+        builder.add_sphere(
+            Sphere { center: Vec3::new(-1.522, 0.5, 0.494), radius: 0.5 },
+            diffuse
+        );
+        builder.add_sphere(
+            Sphere { center: Vec3::new(-0.941, 0.5, -1.294), radius: 0.5 },
+            cornflower
+        );
+        builder.add_sphere(
+            Sphere { center: Vec3::new(0.941, 0.5, -1.294), radius: 0.5 },
+            turquoise
+        );
+        builder.add_sphere(
+            Sphere { center: Vec3::new(1.522, 0.5, 0.494), radius: 0.5 },
+            magenta
+        );
+
+        // Ground
+        builder.add_sphere(Sphere { center: Vec3::new(0., -200.001, 0.), radius: 200. }, ground);
+
+        builder
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [first-scene]: <kbd>[main.rs]</kbd> "First Scene" using `SceneBuilder`]
+</script>
+
+Running the program now should result in the same rendering as before:
+
+  ![Figure [bind-group-rendering-checkpoint]: "First Scene"](../images/img-60-fov-30-deg-zoomed-out.png)
+
+One last thing: the loop in the scene intersection function still uses the hard-coded `OBJECT_COUNT`
+constant which won't match the true object count if we add or remove any spheres. Fortunately, WGSL
+defines an intrinsic called [`arrayLength`](https://www.w3.org/TR/WGSL/#arrayLength-builtin) to
+query the number of elements in a runtime-sized array, based on the size of the underlying storage
+buffer:[^ch11-footnote7]
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    ...
+
+    fn intersect_scene(ray: Ray) -> Intersection {
+      var closest_hit = no_intersection();
+      closest_hit.t = FLT_MAX;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+      for (var i = 0u; i < arrayLength(&spheres); i += 1u) {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+        let sphere = spheres[i];
+        let hit = intersect_sphere(ray, sphere);
+        if hit.t > 0. && hit.t < closest_hit.t {
+          closest_hit = hit;
+        }
+      }
+      if closest_hit.t < FLT_MAX {
+        return closest_hit;
+      }
+      return no_intersection();
+    }
+
+    ...
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL delete
+    const OBJECT_COUNT: u32 = 7;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+
+    @group(1) @binding(0) var<storage> materials: array<Material>;
+    @group(1) @binding(1) var<storage> spheres: array<Sphere>;
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [spheres-buffer-binding-arrayLength]: <kbd>[shaders.wgsl]</kbd> The `arrayLength` function]
+</script>
+
+Now we can create new scenes with any number of spheres without touching the WGSL code.
+
+[^ch11-footnote7]: Not all GPU APIs provide a utility like `arrayLength`. In that case a common
+solution is to store the number of elements in a uniform variable.
+
 
 
                                (insert acknowledgments.md.html here)
