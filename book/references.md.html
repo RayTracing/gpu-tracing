@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<link rel="icon" type="image/png" href="../favicon.png">
+<!-- Markdeep: https://casual-effects.com/markdeep/ -->
+
+References
+==========
+
+[#AlanWolfe2024]: Alan Wolfe [*Beyond White Noise for Real-Time Rendering*](https://youtu.be/tethAU66xaA?si=qIPEwF5XTm8kO3tF), 2024
+
+[#Boksansky2021]: Jakub Boksansky [*Crash Course in BRDF Implementation*](https://boksajak.github.io/blog/BRDF), 2021
+
+[#CookTorrance1982]: Robert L. Cook, Kenneth E. Torrance, *A Reflectance Model for Computer Graphics*, 1982
+
+[#Hoffman2013]: Naty Hoffman, [*Physics and Math of Shading*](https://blog.selfshadow.com/publications/s2013-shading-course/#course_content), 2013
+
+[#Hughes13]: J.F. Hughes, A. van Dam, M. McGuire, D.F. Sklar, J.D. Foley, S.K. Feiner, K. Akeley *Computer Graphics: Principles and Practice, 3rd Edition, Section 1.6*
+
+[#Immel86]: David S. Immel, Michael F. Cohen, Donald P. Greenberg *A Radiosity Method For Non-Diffuse Environments*
+
+[#Jenkins13]: Bob Jenkins, [*A hash function for hash Table lookup*](https://www.burtleburtle.net/bob/hash/doobs.html), 2013
+
+[#Kajiya86]: James T. Kajiya *The Rendering Equation*, 1986
+
+[#Lambert1760]: Johann Heinrich Lambert, *Photometria sive de mensura et gradibus luminis, colorum et umbrae*, 1760. Courtesy of ETH-Bibliothek Zürich, Switzerland.
+
+[#Marsaglia03]: George Marsaglia, [*Xorshift RNGs*](https://www.jstatsoft.org/article/download/v008i14/916), 2003
+
+[#McGuire2024GraphicsCodex]: Morgan McGuire, *The Graphics Codex*, 2024
+
+[#Moller2018]: Tomas Akenine-Möller, Eric Haines, Naty Hoffman, Angelo Pesce, Michał Iwanicki, Sébastien Hillaire, *Real-Time Rendering (Fourth Edition)*, 2018
+
+[#Pharr2023]: Matt Pharr, Wenzel Jakob, and Greg Humphreys, *Physically Based Rendering: From Theory To Implementation, 4th Edition*
+
+[#Saikia]: Sakib Saikia [*Deriving Lambertian BRDF from first principles*](https://sakibsaikia.github.io/graphics/2019/09/10/Deriving-Lambertian-BRDF-From-First-Principles.html)
+
+[#Schlick1994]: Christophe Schlick, *An Inexpensive BRDF Model for Physically-based Rendering*, 1994
+
+[#Shirley2019]: Peter Shirley et al, [*Sampling Transformations Zoo*](https://research.nvidia.com/labs/rtr/publication/shirley2019sampling/), 2019
+
+[^ericson]: C. Ericson, Real Time Collision Detection
+
+[^mcguire-codex]: https://graphicscodex.courses.nvidia.com/app.html
+
+
+<!--
+TODO:
+- A Field Guide to BRDF Models, Stephen H. Westin Hongsong Li Kenneth E. Torrance 2004
+- hanrahan course on markov chain monte carlo PDF ?
+-->
+
+<!--
+@book{McGuire2024GraphicsCodex,
+    title = {The Graphics Codex},
+    author = {Morgan McGuire},
+    year = {2024},
+    edition = {2.17},
+    publisher = {Casual Effects},
+    url = {https://graphicscodex.com}
+}
+-->
+<!--
+@article {Matusik:2003,
+	author = "Wojciech Matusik and Hanspeter Pfister and Matt Brand and Leonard McMillan",
+	title = "A Data-Driven Reflectance Model",
+	journal = "ACM Transactions on Graphics",
+	year = "2003",
+	month = jul,
+	volume = "22",
+	number = "3",
+	pages = "759-769"
+}
+-->
+
+<!-- Markdeep: https://casual-effects.com/markdeep/ -->
+<link rel='stylesheet' href='../style/book.css'>
+<style class="fallback">body{visibility:hidden;white-space:pre;font-family:monospace}</style>
+<script src="markdeep.min.js"></script>
+<script crossorigin="anonymous" src="https://morgan3d.github.io/markdeep/latest/markdeep.min.js"></script>
+<script>window.alreadyProcessedMarkdeep||(document.body.style.visibility="visible")</script>

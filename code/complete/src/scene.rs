@@ -53,6 +53,7 @@ struct SphereBufferEntry {
     _pad: [u32; 3],
 }
 
+#[derive(Copy, Clone)]
 pub struct MaterialId(u32);
 
 #[derive(Default)]

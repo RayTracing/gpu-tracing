@@ -5552,7 +5552,7 @@ Storing the material separately allows multiple `Sphere` instances to reference 
 This reduces the overall required memory when the number of spheres exceeds the available materials.
 Another advantage is that it reduces the size of an individual `Sphere` which is better for memory
 access performance. Note that the `spheres` array gets accessed far more frequently during the search
-for an intersection while the `materials` array is only read once an intersection is found.
+for an intersection while the `materials` array is only read after an intersection is found.
 
 Listing [materials-array] rearranges the scene to contain two spheres that use the same material,
 with a larger sphere acting as the ground and a small one touching the ground at the origin. Let's
@@ -5645,8 +5645,8 @@ The material color here is an analog for _albedo_[^ch9-footnote2] which is defin
 the light reflected by the surface to the total amount of light that it receives.[^ch9-footnote3]
 Now, suppose that we have a function $I(\omega)$ that gives us the radiance arriving at (or leaving)
 a surface patch via direction $\omega$, where $\omega$ is a subset of the hemisphere of all light
-directions ($\Omega$). We can compute the total radiant power arriving at the patch by integrating
-$I$ over the hemisphere:
+directions ($\Omega$) (see Figure [brdf-hemisphere]). We can compute the total radiant power arriving
+at the patch from all directions by integrating $I$ over the hemisphere:
 
 $$
   \int_\Omega I(\omega) ~ | \vec{\mathbf{N}} \cdot \omega | ~ d\omega
@@ -5682,7 +5682,7 @@ $$
 I_{\text{lambertian}}(\omega_o) = \int_\Omega \frac{\text{color}}{\pi} ~ | \vec{\mathbf{N}} \cdot \omega_i | ~ I(\omega_i) ~ d\omega_i
 $$
 
-The first part of the integrand is our Lambertian attenuation factor: $\frac{\text{color}}{\pi} ~ | \vec{\mathbf{N}} \cdot \omega_i |$.
+The first part of the integrand gives us the Lambertian attenuation factor: $\frac{\text{color}}{\pi} ~ | \vec{\mathbf{N}} \cdot \omega_i |$.
 
 When computing an integral with random samples, the way the samples are chosen have an impact on the final
 result. Suppose we have some function $g(x)$ that we want to integrate over some domain $A$. This integral
@@ -5886,7 +5886,7 @@ with both types of material with various colors:
 
 The diffuse surfaces appear matte and featureless but their overall shade still varies based on
 their surroundings. This applies to their color too: try setting the color of the diffuse sphere on the
-right to white (i.e. `vec3f(1.)`). It will appear greener in the bottom half where it gets
+right to white (i.e. `vec3f(1.)`). It will appear noticeably greener in the bottom half where it gets
 illuminated by the ground and bluer in the upper half where it faces the sky.
 
 <br/>
@@ -7825,7 +7825,7 @@ Here is a list of books and articles that that I highly recommend if you want to
   practical introduction to Physically Based Shading.
 
 * _Crash Course in BRDF Implementation_ by Jakub Boksansky is an excellent introduction to BRDFs that covers
-  the fundamentals and provides many references to the literature ([link](https://boksajak.github.io/blog/BRDF)).
+  the fundamentals. It provides many references to the literature and comes with example code ([link](https://boksajak.github.io/blog/BRDF)).
 
 * The [course notes](https://blog.selfshadow.com/publications/s2013-shading-course/hoffman/s2013_pbs_physics_math_notes.pdf)
   from the 2013 SIGGRAPH course _Physics and Math of Shading_ by Naty Hoffman.
@@ -9131,6 +9131,7 @@ initialize a buffer during `build`:
         _pad: [u32; 3],
     }
 
+    #[derive(Copy, Clone)]
     pub struct MaterialId(u32);
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
 
@@ -9245,47 +9246,18 @@ Let's go over the changes:
   The function is generic over any collection of type `Vec&amp;lt&#xFEFF;T&amp;gt`, only requiring
   that `T` implement the `bytemuck::Pod` trait.
 
-We can now specify the entire scene using `SceneBuilder`. We'll move the scene construction code
-into its own function to keep things tidy:
+We can now define the entire scene using `SceneBuilder`. Let's move the definition into its own
+function in a new module that we're going to name "gallery":
+
 
 <script type="preformatted">
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
-    ...
-    async fn main() -> Result<()> {
-        ...
-        let (device, queue, surface) = connect_to_gpu(&window).await?;
-        let mut renderer = render::PathTracer::new(device, queue, WIDTH, HEIGHT);
-        let mut camera = Camera::look_at(
-            Vec3::new(2.8577466, 5.002403, 3.9194741),
-            Vec3::new(0., 0., 0.),
-            Vec3::new(0., 1., 0.),
-        )
-        .with_fov(30_f32.to_radians());
-
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust delete
-        let mut builder = SceneBuilder::default();
-        builder.add_material(Material::metal(Vec3::new(0.7, 0.5, 0.5)));
-        builder.add_material(Material::lambertian(Vec3::new(0.5, 0.5, 0.9)));
-        builder.add_material(Material::lambertian(Vec3::new(0.7, 0.9, 0.2)));
-        builder.add_material(Material::transparent_dielectric(Vec3::all(1.), /*ior*/1.5));
-        builder.add_material(Material::opaque(Vec3::new(0.3, 0.6, 0.9), /*metallic*/0.9));
-        builder.add_material(Material::opaque(Vec3::new(0.3, 0.9, 0.7), /*metallic*/0.3));
-        builder.add_material(Material::opaque(Vec3::new(0.9, 0.3, 0.7), /*metallic*/0.001));
-        let scene_resources = builder.build(renderer.device(), renderer.scene_group_layout());
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
-        let scene_resources =
-            first_scene().build(renderer.device(), renderer.scene_group_layout());
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    use crate::{
+        algebra::Vec3,
+        scene::{Material, SceneBuilder, Sphere},
+    };
 
-        let mut left_mouse_button_pressed = false;
-        let mut right_mouse_button_pressed = false;
-        ...
-    }
-    ...
-
-
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
-    fn first_scene() -> SceneBuilder {
+    pub fn scene_with_spheres() -> SceneBuilder {
         let mut builder = SceneBuilder::default();
 
         let glass = builder.add_material(Material::transparent_dielectric(Vec3::all(1.), 1.5));
@@ -9321,14 +9293,68 @@ into its own function to keep things tidy:
         builder
     }
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    [Listing [first-scene]: <kbd>[main.rs]</kbd> "First Scene" using `SceneBuilder`]
+    [Listing [scene-with-spheres-gallery]: <kbd>[gallery.rs]</kbd> Scene with spheres using `SceneBuilder`]
 </script>
 
-Running the program now should result in the same rendering as before:
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+    use crate::{
+        algebra::Vec3,
+        camera::Camera,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust delete
+        scene::{Material, SceneBuilder, Sphere},
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    };
 
-  ![Figure [bind-group-rendering-checkpoint]: "First Scene"](../images/img-60-fov-30-deg-zoomed-out.png)
+    mod algebra;
+    mod camera;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+    mod gallery;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    mod render;
+    mod scene;
+    ...
+    async fn main() -> Result<()> {
+        ...
+        let (device, queue, surface) = connect_to_gpu(&window).await?;
+        let mut renderer = render::PathTracer::new(device, queue, WIDTH, HEIGHT);
+        let mut camera = Camera::look_at(
+            Vec3::new(2.8577466, 5.002403, 3.9194741),
+            Vec3::new(0., 0., 0.),
+            Vec3::new(0., 1., 0.),
+        )
+        .with_fov(30_f32.to_radians());
 
-One last thing: the loop in the scene intersection function still uses the hard-coded `OBJECT_COUNT`
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust delete
+        let mut builder = SceneBuilder::default();
+        builder.add_material(Material::metal(Vec3::new(0.7, 0.5, 0.5)));
+        builder.add_material(Material::lambertian(Vec3::new(0.5, 0.5, 0.9)));
+        builder.add_material(Material::lambertian(Vec3::new(0.7, 0.9, 0.2)));
+        builder.add_material(Material::transparent_dielectric(Vec3::all(1.), /*ior*/1.5));
+        builder.add_material(Material::opaque(Vec3::new(0.3, 0.6, 0.9), /*metallic*/0.9));
+        builder.add_material(Material::opaque(Vec3::new(0.3, 0.9, 0.7), /*metallic*/0.3));
+        builder.add_material(Material::opaque(Vec3::new(0.9, 0.3, 0.7), /*metallic*/0.001));
+        let scene_resources = builder.build(renderer.device(), renderer.scene_group_layout());
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        let scene_resources = gallery::scene_with_spheres()
+            .build(renderer.device(), renderer.scene_group_layout());
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+
+        let mut left_mouse_button_pressed = false;
+        let mut right_mouse_button_pressed = false;
+        ...
+    }
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [scene-with-spheres-main]: <kbd>[main.rs]</kbd>]
+</script>
+
+Running the program now should result in the same rendering we had before:
+
+  ![Figure [bind-group-rendering-checkpoint]: Scene with spheres](../images/img-60-fov-30-deg-zoomed-out.png)
+
+The loop in the scene intersection function still uses the hard-coded `OBJECT_COUNT`
 constant which won't match the true object count if we add or remove any spheres. Fortunately, WGSL
 defines an intrinsic called [`arrayLength`](https://www.w3.org/TR/WGSL/#arrayLength-builtin) to
 query the number of elements in a runtime-sized array, based on the size of the underlying storage
@@ -9370,79 +9396,252 @@ buffer:[^ch11-footnote7]
     [Listing [spheres-buffer-binding-arrayLength]: <kbd>[shaders.wgsl]</kbd> The `arrayLength` function]
 </script>
 
-Now we can create new scenes with any number of spheres without touching the WGSL code.
 
 [^ch11-footnote7]: Not all GPU APIs provide a utility like `arrayLength`. In that case a common
 solution is to store the number of elements in a uniform variable.
 
 
+Scene Gallery
+-------------
+At this point, adding a new scene simply involves defining a new function in the `gallery` module
+and invoking that in `main`. Here is a variation on the scene with spheres:
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    use crate::{
+        algebra::Vec3,
+        scene::{Material, SceneBuilder, Sphere},
+    };
+
+    pub fn scene_with_spheres() -> SceneBuilder {
+        ...
+    }
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+    pub fn another_scene_with_spheres() -> SceneBuilder {
+        let mut builder = SceneBuilder::default();
+
+        let blue = builder.add_material(Material::opaque(Vec3::new(0., 0.2, 0.9), 0.001));
+        let metal = builder.add_material(Material::metal(Vec3::new(0.8, 0.3, 0.3)));
+        let glass = builder.add_material(Material::transparent_dielectric(Vec3::all(1.), 1.5));
+        let ground = builder.add_material(Material::lambertian(Vec3::new(1., 0.8, 0.1)));
+
+        builder.add_sphere(Sphere { center: Vec3::new(0., 0.5, 1.6), radius: 0.5 }, blue);
+        builder.add_sphere(Sphere { center: Vec3::new(0., 1.1, 1.6), radius: 0.1 }, glass);
+        builder.add_sphere(Sphere { center: Vec3::new(0., 0.2, 0.5), radius: 0.2 }, metal);
+
+        builder.add_sphere(
+            Sphere { center: Vec3::new(-1.522, 0.5, 0.494), radius: 0.5 },
+            blue
+        );
+        builder.add_sphere(
+            Sphere { center: Vec3::new(-1.522, 1.1, 0.494), radius: 0.1 },
+            glass
+        );
+        builder.add_sphere(
+            Sphere { center: Vec3::new(-0.476, 0.2, 0.154), radius: 0.2 },
+            metal
+        );
+
+        builder.add_sphere(
+            Sphere { center: Vec3::new(-0.941, 0.5, -1.294), radius: 0.5 },
+            blue
+        );
+        builder.add_sphere(
+            Sphere { center: Vec3::new(-0.941, 1.1, -1.294), radius: 0.1 },
+            glass
+        );
+        builder.add_sphere(
+            Sphere { center: Vec3::new(-0.294, 0.2, -0.404), radius: 0.2 },
+            metal
+        );
+
+        builder.add_sphere(
+            Sphere { center: Vec3::new(0.941, 0.5, -1.294), radius: 0.5 },
+            blue
+        );
+        builder.add_sphere(
+            Sphere { center: Vec3::new(0.941, 1.1, -1.294), radius: 0.1 },
+            glass
+        );
+        builder.add_sphere(
+            Sphere { center: Vec3::new(0.294, 0.2, -0.404), radius: 0.2 },
+            metal
+        );
+
+        builder.add_sphere(
+            Sphere { center: Vec3::new(1.522, 0.5, 0.494), radius: 0.5 },
+            blue
+        );
+        builder.add_sphere(
+            Sphere { center: Vec3::new(1.522, 1.1, 0.494), radius: 0.1 },
+            glass
+        );
+        builder.add_sphere(
+            Sphere { center: Vec3::new(0.476, 0.2, 0.154), radius: 0.2 },
+            metal
+        );
+
+        // Ground
+        builder.add_sphere(Sphere { center: Vec3::new(0., -200.001, 0.), radius: 200. }, ground);
+
+        builder
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [another-scene-with-spheres-gallery]: <kbd>[gallery.rs]</kbd> A new scene]
+</script>
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+    async fn main() -> Result<()> {
+        ...
+        let (device, queue, surface) = connect_to_gpu(&window).await?;
+        let mut renderer = render::PathTracer::new(device, queue, WIDTH, HEIGHT);
+        let mut camera = Camera::look_at(
+            Vec3::new(2.8577466, 5.002403, 3.9194741),
+            Vec3::new(0., 0., 0.),
+            Vec3::new(0., 1., 0.),
+        )
+        .with_fov(30_f32.to_radians());
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        let scene_resources = gallery::another_scene_with_spheres()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+            .build(renderer.device(), renderer.scene_group_layout());
+
+        let mut left_mouse_button_pressed = false;
+        let mut right_mouse_button_pressed = false;
+        ...
+    }
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [another-scene-with-spheres-main]: <kbd>[main.rs]</kbd>]
+</script>
+
+  ![Figure [another-scene-with-spheres-img]: Another scene with spheres](../images/img-61-another-scene-with-spheres.png)
+
+The arrangement of spheres isn't all that different though it may look more interesting from a
+different point of view. After all it makes sense for the camera configuration to be included in
+the scene definition:
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    use crate::{
+        algebra::Vec3,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        camera::Camera,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+        scene::{Material, SceneBuilder, Sphere},
+    };
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+    pub fn scene_with_spheres() -> (Camera, SceneBuilder) {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+        let mut builder = SceneBuilder::default();
+
+        ...
+
+        // Ground
+        builder.add_sphere(Sphere { center: Vec3::new(0., -200.001, 0.), radius: 200. }, ground);
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        let camera = Camera::look_at(
+            Vec3::new(2.8577466, 5.002403, 3.9194741),
+            Vec3::new(0., 0., 0.),
+            Vec3::new(0., 1., 0.),
+        )
+        .with_fov(30_f32.to_radians());
+
+        (camera, builder)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    }
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+    pub fn another_scene_with_spheres() -> (Camera, SceneBuilder) {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+        let mut builder = SceneBuilder::default();
+
+        ...
+
+        // Ground
+        builder.add_sphere(Sphere { center: Vec3::new(0., -200.001, 0.), radius: 200. }, ground);
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        let camera = Camera::look_at(
+            Vec3::new(3.3252046, 1.7924162, 4.541867),
+            Vec3::new(-0.052276053, 0.32371068, -0.09043576),
+            Vec3::new(0., 1., 0.),
+        )
+        .with_fov(30_f32.to_radians());
+
+        (camera, builder)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [camera-per-scene-gallery]: <kbd>[gallery.rs]</kbd> `Camera` per scene]
+</script>
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust delete
+    use crate::{
+        algebra::Vec3,
+        camera::Camera,
+        scene::{Material, SceneBuilder, Sphere},
+    };
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+
+    ...
+
+    async fn main() -> Result<()> {
+        ...
+        let (device, queue, surface) = connect_to_gpu(&window).await?;
+        let mut renderer = render::PathTracer::new(device, queue, WIDTH, HEIGHT);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        let (mut camera, builder) = gallery::another_scene_with_spheres();
+        let scene_resources = builder.build(renderer.device(), renderer.scene_group_layout());
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+
+        let mut left_mouse_button_pressed = false;
+        let mut right_mouse_button_pressed = false;
+        ...
+    }
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [camera-per-scene-main]: <kbd>[main.rs]</kbd>]
+</script>
+
+  ![Figure [another-scene-with-spheres-different-camera-img]: New scene with different camera parameters](../images/img-62-another-scene-with-spheres-different-camera.png)
+
+TODO: next; gallery, controls
+
+<!--
+    Remaining Chapters
+
+    - Ground Plane (object buffer -> enum)
+    - Transforms
+    - Objects (Cube and Triangle)
+    - FPS Counter
+    - TLAS
+    - Mesh
+    - BLAS
+    - Lights
+    - Upsampling
+    - Depth of Field
+
+-->
 
                                (insert acknowledgments.md.html here)
-
-References
-==========
-
-[#AlanWolfe2024]: Alan Wolfe [*Beyond White Noise for Real-Time Rendering*](https://youtu.be/tethAU66xaA?si=qIPEwF5XTm8kO3tF)
-
-[#CookTorrance1982]: Robert L. Cook, Kenneth E. Torrance, *A Reflectance Model for Computer Graphics*, 1982
-
-[#Hughes13]: J.F. Hughes, A. van Dam, M. McGuire, D.F. Sklar, J.D. Foley, S.K. Feiner, K. Akeley *Computer Graphics: Principles and Practice, 3rd Edition, Section 1.6*
-
-[#Immel86]: David S. Immel, Michael F. Cohen, Donald P. Greenberg *A Radiosity Method For Non-Diffuse Environments*
-
-[#Jenkins13]: Bob Jenkins, [*A hash function for hash Table lookup*](https://www.burtleburtle.net/bob/hash/doobs.html), 2013
-
-[#Kajiya86]: James T. Kajiya *The Rendering Equation*, 1986
-
-[#Lambert1760]: Johann Heinrich Lambert, *Photometria sive de mensura et gradibus luminis, colorum et umbrae*, 1760. Courtesy of ETH-Bibliothek Zürich, Switzerland.
-
-[#Marsaglia03]: George Marsaglia, [*Xorshift RNGs*](https://www.jstatsoft.org/article/download/v008i14/916), 2003
-
-[#McGuire2024GraphicsCodex]: Morgan McGuire, *The Graphics Codex*, 2024
-
-[#Moller2018]: Tomas Akenine-Möller, Eric Haines, Naty Hoffman, Angelo Pesce, Michal Iwanicki, Sébastien Hillaire, *Real-Time Rendering (Fourth Edition)*
-
-[#Pharr2023]: Matt Pharr, Wenzel Jakob, and Greg Humphreys, *Physically Based Rendering: From Theory To Implementation, 4th Edition*
-
-[#Saikia]: Sakib Saikia [*Deriving Lambertian BRDF from first principles*](https://sakibsaikia.github.io/graphics/2019/09/10/Deriving-Lambertian-BRDF-From-First-Principles.html)
-
-[#Schlick1994]: Christophe Schlick, *An Inexpensive BRDF Model for Physically-based Rendering*, 1994
-
-[#Shirley2019]: Peter Shirley et al, [*Sampling Transformations Zoo*](https://research.nvidia.com/labs/rtr/publication/shirley2019sampling/)
-
-[^ericson]: C. Ericson, Real Time Collision Detection
-
-[^mcguire-codex]: https://graphicscodex.courses.nvidia.com/app.html
-
-
-<!--
-TODO:
-- A Field Guide to BRDF Models, Stephen H. Westin Hongsong Li Kenneth E. Torrance 2004
-- hanrahan course on markov chain monte carlo PDF ?
--->
-
-<!--
-@book{McGuire2024GraphicsCodex,
-    title = {The Graphics Codex},
-    author = {Morgan McGuire},
-    year = {2024},
-    edition = {2.17},
-    publisher = {Casual Effects},
-    url = {https://graphicscodex.com}
-}
--->
-<!--
-@article {Matusik:2003,
-	author = "Wojciech Matusik and Hanspeter Pfister and Matt Brand and Leonard McMillan",
-	title = "A Data-Driven Reflectance Model",
-	journal = "ACM Transactions on Graphics",
-	year = "2003",
-	month = jul,
-	volume = "22",
-	number = "3",
-	pages = "759-769"
-}
--->
+                               (insert references.md.html here)
 
 
 [Arman Uguray]:       https://github.com/armansito
