@@ -9247,7 +9247,7 @@ Let's go over the changes:
   that `T` implement the `bytemuck::Pod` trait.
 
 We can now define the entire scene using `SceneBuilder`. Let's move the definition into its own
-function in a new module that we're going to name "gallery":
+function in a new module that we're going to name `gallery`:
 
 
 <script type="preformatted">
@@ -9622,22 +9622,240 @@ the scene definition:
 
   ![Figure [another-scene-with-spheres-different-camera-img]: New scene with different camera parameters](../images/img-62-another-scene-with-spheres-different-camera.png)
 
-TODO: next; gallery, controls
+The scene selection remains hard-coded in the main function. It would be nicer if we could choose
+the rendered scene at runtime, for example with a command-line argument. What if instead the program
+allowed the user to browse all available scenes, like a virtual "gallery"?
+
+The following is a simple `Gallery` data structure that initializes all scenes and stores them in a
+collection:
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    use crate::{
+        algebra::Vec3,
+        camera::Camera,
+        scene::{Material, SceneBuilder, Sphere},
+    };
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+    pub struct Gallery {
+        current_scene_index: usize,
+        scenes: Vec<Scene>,
+    }
+
+    pub struct Scene {
+        pub camera: Camera,
+        pub resources: wgpu::BindGroup,
+    }
+
+    impl Gallery {
+        pub fn new(device: &wgpu::Device, layout: &wgpu::BindGroupLayout) -> Self {
+            let scenes = vec![scene_with_spheres(), another_scene_with_spheres()];
+            Self {
+                current_scene_index: scenes.len() - 1,
+                scenes: scenes
+                    .into_iter()
+                    .map(|(camera, builder)| Scene {
+                        camera,
+                        resources: builder.build(device, layout),
+                    })
+                    .collect(),
+            }
+        }
+
+        pub fn current_scene(&self) -> &Scene {
+            &self.scenes[self.current_scene_index]
+        }
+
+        pub fn current_camera_mut(&mut self) -> &mut Camera {
+            &mut self.scenes[self.current_scene_index].camera
+        }
+
+        pub fn select_next(&mut self) {
+            self.current_scene_index += 1;
+            self.current_scene_index %= self.scenes.len();
+        }
+
+        pub fn select_previous(&mut self) {
+            if self.current_scene_index == 0 {
+                self.current_scene_index = self.scenes.len() - 1;
+            } else {
+                self.current_scene_index -= 1;
+            }
+        }
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+    fn scene_with_spheres() -> (Camera, SceneBuilder) {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+        ...
+    }
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+    fn another_scene_with_spheres() -> (Camera, SceneBuilder) {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+        ...
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [camera-per-scene-gallery]: <kbd>[gallery.rs]</kbd> `Gallery` type]
+</script>
+
+The main function can access the scene data using the `Gallery::current_scene` and
+`Gallery::current_camer_mut` functions (the latter provides mutable access to the current scene
+camera for interactive controls).
+
+The selected scene is represented as an index into the collection. The `Gallery::select_next` and
+`Gallery::select_previous` functions move the index by one. The index wraps around the bounds of the
+`scenes` collection, i.e. moving past the tail end brings it back to the start, and vice versa).
+We'll map these two actions to the "left arrow" and "right arrow" keys:
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+    async fn main() -> Result<()> {
+        let event_loop = EventLoop::new()?;
+        let window_size = winit::dpi::PhysicalSize::new(WIDTH, HEIGHT);
+        let window = WindowBuilder::new()
+            .with_inner_size(window_size)
+            .with_resizable(false)
+            .with_title("GPU Path Tracer".to_string())
+            .build(&event_loop)?;
+
+        let (device, queue, surface) = connect_to_gpu(&window).await?;
+        let mut renderer = render::PathTracer::new(device, queue, WIDTH, HEIGHT);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        let mut gallery =
+            gallery::Gallery::new(renderer.device(), renderer.scene_group_layout());
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+
+        let mut left_mouse_button_pressed = false;
+        let mut right_mouse_button_pressed = false;
+
+        event_loop.run(|event, control_handle| {
+            control_handle.set_control_flow(ControlFlow::Poll);
+            match event {
+                Event::WindowEvent { event, .. } => match event {
+                    WindowEvent::CloseRequested => control_handle.exit(),
+                    WindowEvent::KeyboardInput {
+                        device_id: _,
+                        event,
+                        ..
+                    } => {
+                        use winit::keyboard::{KeyCode, PhysicalKey};
+
+                        if event.state != ElementState::Pressed {
+                            return;
+                        }
+                        match event.physical_key {
+                            PhysicalKey::Code(KeyCode::ArrowUp) => {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+                                gallery.current_camera_mut().adjust_fov(1_f32.to_radians());
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+                                renderer.reset_samples();
+                            }
+                            PhysicalKey::Code(KeyCode::ArrowDown) => {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+                                gallery.current_camera_mut().adjust_fov(-1_f32.to_radians());
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+                                renderer.reset_samples();
+                            }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+                            PhysicalKey::Code(KeyCode::ArrowLeft) => {
+                                gallery.select_previous();
+                                renderer.reset_samples();
+                            }
+                            PhysicalKey::Code(KeyCode::ArrowRight) => {
+                                gallery.select_next();
+                                renderer.reset_samples();
+                            }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+                            _ => (),
+                        }
+                    }
+                    WindowEvent::MouseInput {
+                        device_id: _,
+                        state,
+                        button,
+                    } => {
+                        use winit::event::MouseButton;
+
+                        let pressed = state == ElementState::Pressed;
+                        match button {
+                            MouseButton::Left => left_mouse_button_pressed = pressed,
+                            MouseButton::Right => right_mouse_button_pressed = pressed,
+                            _ => (),
+                        }
+                    }
+                    WindowEvent::RedrawRequested => {
+                        // Wait for the next available frame buffer.
+                        let frame: wgpu::SurfaceTexture = surface
+                            .get_current_texture()
+                            .expect("failed to get current texture");
+
+                        let render_target = frame
+                            .texture
+                            .create_view(&wgpu::TextureViewDescriptor::default());
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+                        let scene = gallery.current_scene();
+                        renderer.render_frame(&scene.camera, &scene.resources, &render_target);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+
+                        frame.present();
+                        window.request_redraw();
+                    }
+                    _ => (),
+                },
+                Event::DeviceEvent { event, .. } => match event {
+                    DeviceEvent::MouseWheel { delta } => {
+                        let delta = match delta {
+                            MouseScrollDelta::PixelDelta(delta) => 0.001 * delta.y as f32,
+                            MouseScrollDelta::LineDelta(_, y) => y * 0.1,
+                        };
+                        gallery.current_camera_mut().zoom(delta);
+                        renderer.reset_samples();
+                    }
+                    DeviceEvent::MouseMotion { delta: (dx, dy) } => {
+                        let dx = dx as f32 * 0.01;
+                        let dy = dy as f32 * -0.01;
+                        if left_mouse_button_pressed {
+                            gallery.current_camera_mut().orbit(dx, dy);
+                            renderer.reset_samples();
+                        }
+                        if right_mouse_button_pressed {
+                            gallery.current_camera_mut().pan(dx, dy);
+                            renderer.reset_samples();
+                        }
+                    }
+                    _ => (),
+                },
+                _ => (),
+            }
+        })?;
+        Ok(())
+    }
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [camera-per-scene-main]: <kbd>[main.rs]</kbd> Initialize and control `Gallery`]
+</script>
+
+You should now be able to use the left and right arrow keys to switch between the two scenes.
 
 <!--
     Remaining Chapters
 
-    - Ground Plane (object buffer -> enum)
+    - Debug Draws (Coord Grid & FPS)
+    - Acceleration Structure
     - Transforms
-    - Objects (Cube and Triangle)
-    - FPS Counter
-    - TLAS
-    - Mesh
+    - Objects (Cube, Plane, Mesh)
     - BLAS
     - Lights
-    - Upsampling
     - Depth of Field
-
+    - Upsampling
 -->
 
                                (insert acknowledgments.md.html here)

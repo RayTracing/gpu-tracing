@@ -7,7 +7,6 @@ use crate::{
     scene::{Material, SceneBuilder, Sphere},
 };
 
-/*
 pub struct Gallery {
     current_scene_index: usize,
     scenes: Vec<Scene>,
@@ -33,18 +32,30 @@ impl Gallery {
         }
     }
 
+    pub fn current_scene(&self) -> &Scene {
+        &self.scenes[self.current_scene_index]
+    }
+
     pub fn current_camera_mut(&mut self) -> &mut Camera {
         &mut self.scenes[self.current_scene_index].camera
     }
 
-    pub fn current_scene(&self) -> &Scene {
-        &self.scenes[self.current_scene_index]
+    pub fn select_next(&mut self) {
+        self.current_scene_index += 1;
+        self.current_scene_index %= self.scenes.len();
+    }
+
+    pub fn select_previous(&mut self) {
+        if self.current_scene_index == 0 {
+            self.current_scene_index = self.scenes.len() - 1;
+        } else {
+            self.current_scene_index -= 1;
+        }
     }
 }
-*/
 
 #[rustfmt::skip]
-pub fn scene_with_spheres() -> (Camera, SceneBuilder) {
+fn scene_with_spheres() -> (Camera, SceneBuilder) {
     let mut builder = SceneBuilder::default();
 
     let glass = builder.add_material(Material::transparent_dielectric(Vec3::all(1.), 1.5));
@@ -88,7 +99,7 @@ pub fn scene_with_spheres() -> (Camera, SceneBuilder) {
 }
 
 #[rustfmt::skip]
-pub fn another_scene_with_spheres() -> (Camera, SceneBuilder) {
+fn another_scene_with_spheres() -> (Camera, SceneBuilder) {
     let mut builder = SceneBuilder::default();
 
     let blue = builder.add_material(Material::opaque(Vec3::new(0., 0.2, 0.9), 0.001));
