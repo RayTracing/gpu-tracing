@@ -15,38 +15,50 @@
 
 Introduction
 ====================================================================================================
-_Ray Tracing_ is a rendering method in Computer Graphics that simulates the flow of light. It can
-faithfully recreate a variety of optical phenomena and can be used to render photorealistic images.
+I was first introduced to Computer Graphics in the late 2000s as a college student. I had spent the
+majority of the waking hours of my childhood playing video games and I was obsessed with the Pixar
+movies of that era. As an artsy kid who was into science and computers, I was naturally drawn to a
+field focused on creating pictures with computers.
 
-_Path tracing_ is an application of this approach used to compute _Global Illumination_. Its
-core idea is to repeatedly trace millions of random rays through a scene and bounce them off
-objects based on surface properties. The algorithm is remarkably simple and relatively easy
-to implement when applied to a small number of material and geometry types. Peter
-Shirley's [_Ray Tracing In One Weekend_][RTIOW] (RTIOW) is a great introduction to building the
-foundation for a hobby renderer.
+It didn't take too long before I started to truly appreciate the breadth and depth of Computer Graphics.
+It is a field that puts a wide range of disciplines into practice, drawing from applied mathematics,
+physics, engineering, and art to name a few. Math concepts like linear algebra and numerical integration
+-- which I understood only vaguely -- finally made sense as I directly applied the theory while learning
+how to build computer programs.
 
-A challenge with path tracing is its high computational cost. Rendering a complex scene takes a
-long time and this get worse as the rendered scenes get complex. This has historically made path
-tracing unsuitable for real-time applications. Fortunately -- like many problems in Computer
-Graphics -- the algorithm lends itself very well to parallelism. It is possible to achieve a
-significant speedup by distributing the work across many processor cores.
+The introductory Computer Graphics course in my school had us gradually augment a small rendering application by
+applying a new concept each week, eventually culminating in a Whitted-style[^intro-footnote1]
+ray tracer. Ray tracing is a method for simulating the flow of light through a virtual
+scene that can recreate optical phenomena like shadows, reflections, and refraction. My ray tracer
+could only render basic shapes and didn't support any materials or complex lighting. Still, I was fascinated
+and came out of the course obsessed enough to want to pursue a career in rendering.
 
-The GPU (Graphics Processing Unit) is a type of processor designed to run the same set of operations
-over large amounts of data in parallel. This parallelism has been instrumental to achieving
-realistic visuals in real-time applications like video games. GPUs have been traditionally used to
-accelerate scanline rasterization but have since become programmable and capable of running
-a variety of parallel workloads. Notably, modern GPUs are now equipped with hardware cores dedicated
-to ray tracing.
+Ray tracing -- or more specifically _path tracing_[^intro-footnote2] -- has been the standard for
+computer-generated imagery in visual effects and computer animation over the past two decades.
+Path tracing can create photorealistic images by solving the so-scalled _Global Illumination_ problem, which
+accounts for light that bounces off all objects in the scene and not just light sources.
 
-GPUs aren't without limitations. Programming a GPU requires a different approach than a typical CPU
-program. Taking full advantage of a GPU often involves careful tuning based on its architecture and
-capabilities which can vary widely across vendors and models. Rendering fully path-traced scenes
-at real-time rates remains elusive even on the most high-end GPUs. This is an an active and vibrant
-area of Computer Graphics research.
+A challenge with path tracing is its high computational cost. It typically takes a long time to render
+a single image and this has historically made path tracing unsuitable for real-time applications. However, with
+recent advances in both algorithms and GPU hardware, techniques based on ray tracing have increasingly become
+more practical in real-time applications like games. Just the raw parallel computation power of a GPU (i.e. the
+ability to perform the same operation simultaneously over many pieces of data) can by itself give a 10x speed-up
+to a basic path tracer without applying any sophisticated techniques.
 
-This book is an introduction to GPU programming by building a simple GPU accelerated path tracer.
-We'll focus on building a renderer that can produce high quality and correct images using a fairly
-simple design. It won't be full-featured and its performance will be limited, however it will expose
+When I first started out, there was an abundance of textbooks and materials focused on theory but
+few guides for beginners that focused on building a renderer from scratch. This was particularly
+the case for GPUs, where the complexity of the programming model and differences across hardware vendors make
+the initial learning curve particularly high for a beginner.
+
+I spent the first half of my career building CPU and GPU platform software without focusing much on rendering
+algorithms. While I was ramping back up on theory nearly a decade after my first introduction to CG, I stumbled upon
+[_Ray Tracing In One Weekend_][RTIOW] by Peter Shirley. The book holds the reader's hand in quickly building a
+simple CPU path tracer while teaching some theory. I found the self-guided "show, then tell" approach refreshing.
+Then I decided that there should be a similar book for building a GPU path tracer too!
+
+This book is an introduction to GPU programming that focuses on building a simple GPU accelerated path tracer.
+It will help you build a simple renderer that can produce high quality and correct images using a fairly. It
+won't be full-featured and its performance will be limited, however it will expose
 you to several fundamental GPU programming concepts. By the end, the renderer you'll have built can
 serve as a great starting point for extensions and experiments with more advanced GPU techniques. We will
 avoid most optimizations in favor of simplicity but the renderer will be able to achieve interactive
@@ -63,6 +75,11 @@ architecture.
 If you run into any problems with your implementation, have general questions or corrections, or
 would like to share your own ideas or work, check out [the GitHub Discussions forum][discussions].
 
+[^intro-footnote1]: [Turner Whitted](https://en.wikipedia.org/wiki/J._Turner_Whitted) invented the
+recursive ray tracing algorithm which is the subject of this book.
+
+[^intro-footnote2]: Invented by [James Kajiya](https://en.wikipedia.org/wiki/Jim_Kajiya) as a
+general solution of the "rendering equation".
 
 [^ch1]: A BVH-accelerated implementation can render a version of the RTIOW cover scene with ~32,000
 spheres, 16 ray bounces per pixel, and a resolution of 2048x1536 on a 2022 _Apple M1 Max_ in 15
@@ -5709,8 +5726,8 @@ This gives us a correct solution and the resulting albedo equals the material co
 sampling distribution isn't efficient. Think about the lower parts of the
 hemisphere where rays are almost tangent to the surface and the dot product is near zero. Radiance
 computed by tracing paths in these directions will get attenuated so much that they won't
-significantly contribute to the resulting image. Since these directions are somewhat "unimportant",
-sampling all directions with equal likelihood ends up wasting computation time.
+significantly contribute to the resulting image. Since these directions are somewhat unimportant,
+sampling them  with equal likelihood ends up wasting computation time.
 
 That's not to say that these directions don't contribute any radiance at all. We can sample
 them less frequently by picking a $\rho$ that is proportional to $| \vec{\mathbf{N}} \cdot \omega_i |$
@@ -9843,12 +9860,199 @@ We'll map these two actions to the "left arrow" and "right arrow" keys:
     [Listing [camera-per-scene-main]: <kbd>[main.rs]</kbd> Initialize and control `Gallery`]
 </script>
 
-You should now be able to use the left and right arrow keys to switch between the two scenes.
+You can now use the left and right arrow keys to navigate between your scenes.
+
+<!-- <p class="dinkus"> * * * </p> -->
+<!--
+<p class="dinkus">&#x2042;</p>
+
+Great job on making it this far!
+By now you have already built a GPU-accelerated path
+tracer. Even In the rest of this book, we're going to enhance the renderer to support more complex scenes
+with more interesting objects and lighting.
+
+Debug Draws
+===========
+
+
+By this stage you have already implemented a GPU-accelerated path tracer. It's a simple renderer at
+the moment
+
+
+
+but we'll spend the next few chapters on more advanced geometry and lighting. Before we do that, let's look at a few tools
+in, it will be useful to instrument our code with a few
+tools that will come in handy as we add more features.
+
+Our program currently displays the path traced rendering inside the main application window. We are
+going to extend it to show additional content to give us some insight into its internal state and
+performance.
+
+FPS Counter
+-----------
+A useful indicator of a graphical application's runtime performance is its _frame rate_. The
+frame rate measures how fast the application computes and displays new content. The units are
+generally _frames per second_ (fps) or simply $\frac{1}{\text{s}}$ ($\text{Hz}$). To compute it, simply
+measure the time between two subsequent frames in seconds and take its reciprocal. For example, if
+a new frame took 10 milliseconds to present then the frame rate is 100 Hz.
+
+We can use the `Instant` type from Rust's `std::time` module to obtain a timestamp and use that
+to measure the frame duration in seconds. For now, let's compute the frame rate and print it to
+the console on every frame:
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    use {
+        anyhow::{Context, Result},
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        std::time::Instant,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+        winit::{
+            event::{DeviceEvent, ElementState, Event, MouseScrollDelta, WindowEvent},
+            event_loop::{ControlFlow, EventLoop},
+            window::{Window, WindowBuilder},
+        },
+    };
+    ...
+    async fn main() -> Result<()> {
+        let event_loop = EventLoop::new()?;
+        let window_size = winit::dpi::PhysicalSize::new(WIDTH, HEIGHT);
+        let window = WindowBuilder::new()
+            .with_inner_size(window_size)
+            .with_resizable(false)
+            .with_title("GPU Path Tracer".to_string())
+            .build(&event_loop)?;
+
+        let (device, queue, surface) = connect_to_gpu(&window).await?;
+        let mut renderer = render::PathTracer::new(device, queue, WIDTH, HEIGHT);
+        let mut gallery =
+            gallery::Gallery::new(renderer.device(), renderer.scene_group_layout());
+
+        let mut left_mouse_button_pressed = false;
+        let mut right_mouse_button_pressed = false;
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        let mut frame_time = Instant::now();
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+
+        event_loop.run(|event, control_handle| {
+            control_handle.set_control_flow(ControlFlow::Poll);
+            match event {
+                Event::WindowEvent { event, .. } => match event {
+                    ...
+                    WindowEvent::RedrawRequested => {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+                        // Compute time elapsed since the start of the previous frame.
+                        let now = Instant::now();
+                        let frame_duration = (now - frame_time).as_secs_f32();
+                        frame_time = now;
+
+                        let fps = 1.0 / frame_duration;
+                        println!("FPS: {fps}");
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+
+                        // Wait for the next available frame buffer.
+                        let frame: wgpu::SurfaceTexture = surface
+                            .get_current_texture()
+                            .expect("failed to get current texture");
+
+                        let render_target = frame
+                            .texture
+                            .create_view(&wgpu::TextureViewDescriptor::default());
+
+                        let scene = gallery.current_scene();
+                        renderer.render_frame(&scene.camera, &scene.resources, &render_target);
+
+                        frame.present();
+                        window.request_redraw();
+                    }
+                    _ => (),
+                },
+                Event::DeviceEvent { event, .. } => match event {
+                    ...
+                },
+                _ => (),
+            }
+        })?;
+        Ok(())
+    }
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [fps-calculation]: <kbd>[main.rs]</kbd> Simple frame rate calculation.]
+</script>
+
+When you run the program from a command-line, you should see something like this:
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Bash
+    FPS: 120.967735
+    FPS: 119.32818
+    FPS: 120.465
+    FPS: 122.15419
+    FPS: 117.90484
+    FPS: 122.382774
+    FPS: 113.87036
+    FPS: 121.70385
+    FPS: 120.682465
+    FPS: 121.60026
+    FPS: 119.19721
+    FPS: 123.19126
+    FPS: 118.22835
+    FPS: 121.74275
+    FPS: 118.36013
+    FPS: 121.92395
+    FPS: 115.64817
+    FPS: 123.791725
+    FPS: 118.76485
+    FPS: 121.42247
+    FPS: 119.06297
+    FPS: 118.616936
+    FPS: 121.447655
+    FPS: 120.7845
+    FPS: 118.476395
+    FPS: 122.1859
+    FPS: 116.324715
+    FPS: 122.81743
+    FPS: 120.39612
+    FPS: 120.58483
+    FPS: 118.42554
+    FPS: 121.399734
+    FPS: 118.37822
+    FPS: 119.12917
+    FPS: 121.7446
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When we configured the `wgpu::Surface` earlier on, we set the "present mode" to "V-Sync"
+(see `connect_to_gpu()`). This synchronizes the frame presentation with the display refresh rate,
+which is enforced by the call to `surface.get_current_texture()`. I happen to run this on a 120 Hz
+display, so the numbers that I see are in that ballpark. TODO: you'll noteice the numbers are not regular, it's never precise
+
+
+
+Subsections:
+- Introduction: debug visualizations intro
+- FPS Display: 2D drawing
+  - Fixing the aspect ratio
+  - Transparency / Blending
+- Drawing in 3D
+- Bounding Boxes
+  - wireframe vs solid
+- Coordinate Grid
+
+for the Drawing in 3D section:
+- Step by step perspective projecton:
+  - Draw quad in screen space, z=1 (talk about NDC z-range)
+  - aspect ratio, FOV
+  - skew z coords (tilt quad, should have no change)
+  - Z-divide (within 0-1 range), fixed image plane (w = 1/d)
+  - near/far remapping
+- View matrix
+  - unskewed quad, rotation
+-->
 
 <!--
     Remaining Chapters
 
-    - Debug Draws (Coord Grid & FPS)
     - Acceleration Structure
     - Transforms
     - Objects (Cube, Plane, Mesh)
