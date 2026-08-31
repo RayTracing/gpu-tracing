@@ -44,6 +44,12 @@ pub struct Sphere {
     pub radius: f32,
 }
 
+pub struct Disc {
+    pub center: Vec3,
+    pub radius: f32,
+    pub normal: Vec3,
+}
+
 #[derive(Debug, Copy, Clone, Pod, Zeroable)]
 #[repr(C)]
 struct SphereBufferEntry {
@@ -53,6 +59,15 @@ struct SphereBufferEntry {
     _pad: [u32; 3],
 }
 
+#[derive(Debug, Copy, Clone, Pod, Zeroable)]
+#[repr(C)]
+struct DiscBufferEntry {
+    center: Vec3,
+    radius: f32,
+    normal: Vec3,
+    material_index: u32,
+}
+
 #[derive(Copy, Clone)]
 pub struct MaterialId(u32);
 
@@ -60,6 +75,7 @@ pub struct MaterialId(u32);
 pub struct SceneBuilder {
     materials: Vec<Material>,
     spheres: Vec<SphereBufferEntry>,
+    discs: Vec<DiscBufferEntry>,
 }
 
 impl SceneBuilder {
@@ -78,6 +94,16 @@ impl SceneBuilder {
         self.spheres.push(entry)
     }
 
+    pub fn add_disc(&mut self, disc: Disc, material: MaterialId) {
+        let entry = DiscBufferEntry {
+            center: disc.center,
+            radius: disc.radius,
+            normal: disc.normal,
+            material_index: material.0,
+        };
+        self.discs.push(entry)
+    }
+
     pub fn build(
         self,
         device: &wgpu::Device,
@@ -87,6 +113,8 @@ impl SceneBuilder {
             create_storage_buffer_with_data(device, &self.materials, Some("materials"));
         let spheres_buffer =
             create_storage_buffer_with_data(device, &self.spheres, Some("spheres"));
+        let discs_buffer =
+            create_storage_buffer_with_data(device, &self.discs, Some("discs"));
 
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("scene resources"),
@@ -108,6 +136,14 @@ impl SceneBuilder {
                         size: None,
                     }),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &discs_buffer,
+                        offset: 0,
+                        size: None,
+                    }),
+                },
             ],
         })
     }
@@ -121,12 +157,12 @@ fn create_storage_buffer_with_data<T: Pod>(
     // Create the buffer already mapped and initialize data without an explicit transfer.
     let buffer = device.create_buffer(&wgpu::BufferDescriptor {
         label,
-        size: (std::mem::size_of::<T>() * data.len()) as u64,
+        size: (std::mem::size_of::<T>() * data.len().max(1)) as u64,
         usage: wgpu::BufferUsages::STORAGE,
         mapped_at_creation: true,
     });
     // Copy the data into the buffer.
-    {
+    if data.len() > 0 {
         let mut view = buffer.slice(..).get_mapped_range_mut();
         view.as_mut()
             .copy_from_slice(bytemuck::cast_slice(data.as_slice()));

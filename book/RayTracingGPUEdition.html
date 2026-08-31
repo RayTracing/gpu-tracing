@@ -9093,6 +9093,9 @@ extending the bind group layout:
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("scene resource layout"),
                 entries: &[
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+                    // Materials
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
                     wgpu::BindGroupLayoutEntry {
                         binding: 0,
                         visibility: wgpu::ShaderStages::FRAGMENT,
@@ -9104,6 +9107,7 @@ extending the bind group layout:
                         count: None,
                     },
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+                    // Spheres
                     wgpu::BindGroupLayoutEntry {
                         binding: 1,
                         visibility: wgpu::ShaderStages::FRAGMENT,
@@ -9155,6 +9159,9 @@ initialize a buffer during `build`:
     #[derive(Default)]
     pub struct SceneBuilder {
         materials: Vec<Material>,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        spheres: Vec<SphereBufferEntry>,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
     }
 
     impl SceneBuilder {
@@ -9705,16 +9712,11 @@ collection:
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
 
 
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
     fn scene_with_spheres() -> (Camera, SceneBuilder) {
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
         ...
     }
 
-
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
     fn another_scene_with_spheres() -> (Camera, SceneBuilder) {
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
         ...
     }
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -9862,8 +9864,740 @@ We'll map these two actions to the "left arrow" and "right arrow" keys:
 
 You can now use the left and right arrow keys to navigate between your scenes.
 
+
+Shapes
+======
+Spheres are often the first objects people implement when building a ray tracer. A sphere has a well-known
+implicit equation and that makes ray-sphere intersection easy to formulate. It also has a curved
+surface which is handy when evaluating variations in reflectance. Then again a sphere is one of many
+geometric shapes with an implicit formula and it's about time we added some variety to our renderer.
+
+Ray-Plane Intersection
+----------------------
+The next logical alternative to a round ball is a flat surface. An infinite plane is a 2-dimensional
+object that divides 3D space into two subregions. A plane can be defined by simply a normal vector (which
+is the same across the entire plane) and a point in 3D space that is on the plane. The point implicitly
+defines where the plane intersects the 3D space, though there are infinite such points. For an infinite
+plane, the can also be expressed with a scalar displacement that represents how far the plane is
+offset from the origin along the normal vector.
+
+
+![Figure [plane-intersecting-origin]: A plane defined by point $\mathbf{Q}$ and normal $\vec{\mathbf{N}}$. Here $\mathbf{Q}$ is located at the origin of the coordinate axes.](../images/fig-23-infinite-plane.svg)
+
+Given a plane defined by point $\mathbf{Q}$ and normal $\vec{\mathbf{N}}$, then any point $\mathbf{X}$
+is on the plane if
+
+  $$ \vec{\mathbf{N}} \cdot (\mathbf{X} - \mathbf{Q}) = 0 $$
+
+This has a simple geometric explanation: given any two points on the plane, the vector that spans between
+them must be perpendicular to the normal vector of the plane. Let's substitute our ray equation
+$\mathbf{X} = \mathbf{P} + t\vec{\mathbf{d}}$:
+
+  $$
+  \begin{aligned}
+  \vec{\mathbf{N}} \cdot (\mathbf{P} + t\vec{\mathbf{d}} - \mathbf{Q}) &= 0 \\
+  \vec{\mathbf{N}} \cdot \mathbf{P} + \vec{\mathbf{N}} \cdot t\vec{\mathbf{d}} - \vec{\mathbf{N}} \cdot \mathbf{Q} &= 0 \\
+  \vec{\mathbf{N}} \cdot \mathbf{P} + \vec{\mathbf{N}} \cdot t\vec{\mathbf{d}} &= \vec{\mathbf{N}} \cdot \mathbf{Q} \\
+  \vec{\mathbf{N}} \cdot \mathbf{P} + t(\vec{\mathbf{N}} \cdot \vec{\mathbf{d}}) &= \vec{\mathbf{N}} \cdot \mathbf{Q} \\
+  t(\vec{\mathbf{N}} \cdot \vec{\mathbf{d}}) &= \vec{\mathbf{N}} \cdot \mathbf{Q} - \vec{\mathbf{N}} \cdot \mathbf{P} \\
+  t &= \frac{\vec{\mathbf{N}} \cdot \mathbf{Q} - \vec{\mathbf{N}} \cdot \mathbf{P}}{\vec{\mathbf{N}} \cdot \vec{\mathbf{d}}} \\
+  t &= \frac{\vec{\mathbf{N}} \cdot (\mathbf{Q} - \mathbf{P})}{\vec{\mathbf{N}} \cdot \vec{\mathbf{d}}}
+  \end{aligned}
+  $$
+
+This gives us our $t$. When $\mathbf{N} \cdot \mathbf{d} = 0$, i.e. the ray direction is perpendicular to the normal
+and thus parallel to the plane, $t$ is undefined and there is no intersection.
+
+Let's test this with a new scene that contains a single sphere that sits on top of a plane. Since `SceneBuilder`
+can't represent planes yet, we'll hardcode the plane directly into the scene intersection loop of the shader
+program:
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+    impl Gallery {
+        pub fn new(device: &wgpu::Device, layout: &wgpu::BindGroupLayout) -> Self {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+            let scenes = vec![
+                scene_with_spheres(),
+                another_scene_with_spheres(),
+                scene_with_shapes()
+            ];
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+            Self {
+                current_scene_index: scenes.len() - 1,
+                scenes: scenes
+                    .into_iter()
+                    .map(|(camera, builder)| Scene {
+                        camera,
+                        resources: builder.build(device, layout),
+                    })
+                    .collect(),
+            }
+        }
+        ...
+    }
+
+    fn scene_with_spheres() -> (Camera, SceneBuilder) {
+        ...
+    }
+
+    fn another_scene_with_spheres() -> (Camera, SceneBuilder) {
+        ...
+    }
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+    fn scene_with_shapes() -> (Camera, SceneBuilder) {
+        let mut builder = SceneBuilder::default();
+
+        let ground = builder.add_material(Material::lambertian(Vec3::new(1., 0.8, 0.1)));
+        let sphere = builder.add_material(Material::opaque(Vec3::new(0.9, 0.2, 0.4), 0.001));
+
+        builder.add_sphere(Sphere { center: Vec3::new(0., 0.5, 0.), radius: 0.5 }, sphere);
+
+        let camera = Camera::look_at(
+            Vec3::new(0., 0.6, 2.),
+            Vec3::new(0., 0.5, 0.),
+            Vec3::new(0., 1., 0.)
+        ).with_fov(60_f32.to_radians());
+
+        (camera, builder)
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [scene-to-test-plane]: <kbd>[gallery.rs]</kbd> New scene to place a plane into]
+</script>
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    ...
+    fn intersect_sphere(ray: Ray, sphere: Sphere) -> Intersection {
+      ...
+    }
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+    fn intersect_plane(ray: Ray, normal: vec3f, center: vec3f, material: u32) -> Intersection {
+      let n_dot_d = dot(normal, ray.direction);
+      if abs(n_dot_d) == 0. {
+        return no_intersection();
+      }
+      let t = dot(normal, center - ray.origin) / n_dot_d;
+      if t < EPSILON {
+        return no_intersection();
+      }
+      return Intersection(normal, t, material);
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+
+    fn intersect_scene(ray: Ray) -> Intersection {
+      var closest_hit = no_intersection();
+      closest_hit.t = FLT_MAX;
+      for (var i = 0u; i < arrayLength(&spheres); i += 1u) {
+        let sphere = spheres[i];
+        let hit = intersect_sphere(ray, sphere);
+        if hit.t > 0. && hit.t < closest_hit.t {
+          closest_hit = hit;
+        }
+      }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+      // After testing all spheres, test a "ground" plane at the origin facing up. Use the
+      // first material for now.
+      let plane_hit = intersect_plane(ray, vec3(0., 1., 0), vec3(0.), 0);
+      if plane_hit.t > 0. && plane_hit.t < closest_hit.t {
+        closest_hit = plane_hit;
+      }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+      if closest_hit.t < FLT_MAX {
+        return closest_hit;
+      }
+      return no_intersection();
+    }
+
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [hardcoded-plane-intersection]: <kbd>[shaders.wgsl]</kbd> `intersect_plane`]
+</script>
+
+  ![Figure [sphere-and-ground-plane]: Scene with a flat ground plane](../images/img-63-sphere-and-ground-plane.png)
+
+Disc
+----
+This looks similar to our earlier scenes with the notable difference that the ground is no longer curved. While an
+infinite plane can be useful on its own, the plane intersection logic can be constrained to represent other shapes
+that contain a flat surface. For instance, by adding a radius parameter we can turn this into a function that
+represents a circular disc centered around a point. This can be implemented by simply finding the ray intersection
+point on the plane and rejecting the intersection if the distance between this point and the center of the disc
+exceeds the radius:
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL delete
+    fn intersect_plane(ray: Ray, normal: vec3f, center: vec3f, material: u32) -> Intersection {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+    struct Disc {
+      center: vec3f,
+      radius: f32,
+      normal: vec3f,
+      material_index: u32,
+    }
+
+    fn intersect_disc(ray: Ray, disc: Disc) -> Intersection {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+      let n_dot_d = dot(disc.normal, ray.direction);
+      if abs(n_dot_d) == 0. {
+        return no_intersection();
+      }
+      let t = dot(disc.normal, disc.center - ray.origin) / n_dot_d;
+      if t < EPSILON {
+        return no_intersection();
+      }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+      let p = ray.origin + t * ray.direction - disc.center;
+      if length(p) > disc.radius {
+        return no_intersection();
+      }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+      return Intersection(disc.normal, t, disc.material_index);
+    }
+
+    fn intersect_scene(ray: Ray) -> Intersection {
+      var closest_hit = no_intersection();
+      closest_hit.t = FLT_MAX;
+      for (var i = 0u; i < arrayLength(&spheres); i += 1u) {
+        let sphere = spheres[i];
+        let hit = intersect_sphere(ray, sphere);
+        if hit.t > 0. && hit.t < closest_hit.t {
+          closest_hit = hit;
+        }
+      }
+      // After testing all spheres, test a "ground" plane at the origin facing up. Use the
+      // first material for now.
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL delete
+      let plane_hit = intersect_plane(ray, vec3(0., 1., 0), vec3(0.), 0);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+      let plane_hit = intersect_disc(ray, Disc(vec3(0.), 1., vec3(0., 1., 0.), 0));
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+      if plane_hit.t > 0. && plane_hit.t < closest_hit.t {
+        closest_hit = plane_hit;
+      }
+      if closest_hit.t < FLT_MAX {
+        return closest_hit;
+      }
+      return no_intersection();
+    }
+
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [hardcoded-disc-intersection]: <kbd>[shaders.wgsl]</kbd> `intersect_disc`]
+</script>
+
+  ![Figure [sphere-and-ground-disc]: Sphere resting on a disc](../images/img-64-sphere-and-ground-disc.png)
+
+Note that we can slightly optimize the intersection logic by comparing squared distance and thus avoid
+an expensive square-root operation that is implicit in the `length` intrinsic. We can also compute
+`disc.center - ray.origin` once and reuse it:
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    ...
+    struct Disc {
+      center: vec3f,
+      radius: f32,
+      normal: vec3f,
+      material_index: u32,
+    }
+
+    fn intersect_disc(ray: Ray, disc: Disc) -> Intersection {
+      let n_dot_d = dot(disc.normal, ray.direction);
+      if abs(n_dot_d) == 0. {
+        return no_intersection();
+      }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+      let o = disc.center - ray.origin;
+      let t = dot(disc.normal, o) / n_dot_d;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+      if t < EPSILON {
+        return no_intersection();
+      }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+      let p = t * ray.direction - o;
+      if dot(p, p) > disc.radius * disc.radius {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+        return no_intersection();
+      }
+      return Intersection(disc.normal, t, disc.material_index);
+    }
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [intersect-disc-optimization]: <kbd>[shaders.wgsl]</kbd> A small optimization to `intersect_disc`]
+</script>
+
+A disc can represent a flat ground that stretches to the horizon just as well. Just increase the radius to
+something really large, like $1,000$ or more.
+
+The next step is to incorporate the disc into the scene representation that both `SceneBuilder` and the
+shader program can understand. A scene currently consists of one GPU buffer that contains a list of spheres.
+We could simply add another one for discs. The `intersect_scene` function would first test all spheres,
+then all discs for the closest hit.
+
+Given that we already have a `Disc` type, we can use that to define a new buffer binding:
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    ...
+
+    fn intersect_scene(ray: Ray) -> Intersection {
+      var closest_hit = no_intersection();
+      closest_hit.t = FLT_MAX;
+      for (var i = 0u; i < arrayLength(&spheres); i += 1u) {
+        let sphere = spheres[i];
+        let hit = intersect_sphere(ray, sphere);
+        if hit.t > 0. && hit.t < closest_hit.t {
+          closest_hit = hit;
+        }
+      }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+      for (var i = 0u; i < arrayLength(&spheres); i += 1u) {
+        let disc = discs[i];
+        let hit = intersect_disc(ray, disc);
+        if hit.t > 0. && hit.t < closest_hit.t {
+          closest_hit = hit;
+        }
+      }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+      if closest_hit.t < FLT_MAX {
+        return closest_hit;
+      }
+      return no_intersection();
+    }
+
+    ...
+
+    @group(1) @binding(0) var<storage> materials: array<Material>;
+    @group(1) @binding(1) var<storage> spheres: array<Sphere>;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+    @group(1) @binding(2) var<storage> discs: array<Disc>;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [discs-buffer-binding]: <kbd>[shaders.wgsl]</kbd> The `discs` buffer binding]
+</script>
+
+Since we declared a new binding, we need to update the bind group layout and add the code that
+populates the new buffer:
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+    fn create_pipeline(
+        device: &wgpu::Device,
+        shader_module: &wgpu::ShaderModule,
+    ) -> (wgpu::RenderPipeline, wgpu::BindGroupLayout, wgpu::BindGroupLayout) {
+        ...
+        let scene_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("scene resource layout"),
+                entries: &[
+                    // Materials
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    // Spheres
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+                    // Discs 
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+                  ],
+            });
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        ...
+    }
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [discs-bind-group-entry]: <kbd>[render.rs]</kbd> The `discs` buffer binding]
+</script>
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+
+    pub struct Sphere {
+        pub center: Vec3,
+        pub radius: f32,
+    }
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+    pub struct Disc {
+        pub center: Vec3,
+        pub radius: f32,
+        pub normal: Vec3,
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+
+    #[derive(Debug, Copy, Clone, Pod, Zeroable)]
+    #[repr(C)]
+    struct SphereBufferEntry {
+        center: Vec3,
+        radius: f32,
+        material_index: u32,
+        _pad: [u32; 3],
+    }
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+    #[derive(Debug, Copy, Clone, Pod, Zeroable)]
+    #[repr(C)]
+    struct DiscBufferEntry {
+        center: Vec3,
+        radius: f32,
+        normal: Vec3,
+        material_index: u32,
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+
+    #[derive(Copy, Clone)]
+    pub struct MaterialId(u32);
+
+    #[derive(Default)]
+    pub struct SceneBuilder {
+        materials: Vec<Material>,
+        spheres: Vec<SphereBufferEntry>,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        discs: Vec<DiscBufferEntry>,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    }
+
+    impl SceneBuilder {
+        pub fn add_material(&mut self, material: Material) -> MaterialId {
+            self.materials.push(material);
+            MaterialId((self.materials.len() - 1).try_into().unwrap())
+        }
+
+        pub fn add_sphere(&mut self, sphere: Sphere, material: MaterialId) {
+            let entry = SphereBufferEntry {
+                center: sphere.center,
+                radius: sphere.radius,
+                material_index: material.0,
+                _pad: [0; 3],
+            };
+            self.spheres.push(entry)
+        }
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        pub fn add_disc(&mut self, disc: Disc, material: MaterialId) {
+            let entry = DiscBufferEntry {
+                center: disc.center,
+                radius: disc.radius,
+                normal: disc.normal,
+                material_index: material.0,
+            };
+            self.disc.push(entry)
+        }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+
+        pub fn build(
+            self,
+            device: &wgpu::Device,
+            layout: &wgpu::BindGroupLayout,
+        ) -> wgpu::BindGroup {
+        let material_buffer =
+            create_storage_buffer_with_data(device, &self.materials, Some("materials"));
+        let spheres_buffer =
+            create_storage_buffer_with_data(device, &self.spheres, Some("spheres"));
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        let discs_buffer =
+            create_storage_buffer_with_data(device, &self.discs, Some("discs"));
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("scene resources"),
+                layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &material_buffer,
+                            offset: 0,
+                            size: None,
+                        }),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &spheres_buffer,
+                            offset: 0,
+                            size: None,
+                        }),
+                    },
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &discs_buffer,
+                            offset: 0,
+                            size: None,
+                        }),
+                    },
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+                ],
+            })
+        }
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [scene-builder-build-with-discs]: <kbd>[scene.rs]</kbd> `SceneBuilder::add_disc`]
+</script>
+
+That was all the necessary boilerplate. However, there is one more wrinkle we need to deal with. If
+you run the program now, it will crash with this validation error:
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ bash
+    thread 'main' panicked at src/scene.rs:168:31:
+    buffer slices can not be empty
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The bug is in the `create_storage_buffer_with_data` function which tries to obtain a slice over a
+zero-length buffer and wgpu doesn't like that. We haven't had a scene that caused an empty buffer
+until now since they all have at least one sphere in them. Now we have discs in the mix but it would
+be annoying to require every scene to contain at least one disc. That won't scale well with more
+objects types coming soon. So we should generally allow these scene buffers to be empty.
+
+Let's guard against the slice call and avoid it if the buffer size is 0:
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+    fn create_storage_buffer_with_data<T: Pod>(
+        device: &wgpu::Device,
+        data: &Vec<T>,
+        label: Option<&str>,
+    ) -> wgpu::Buffer {
+        // Create the buffer already mapped and initialize data without an explicit transfer.
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label,
+            size: (std::mem::size_of::<T>() * data.len()) as u64,
+            usage: wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: true,
+        });
+        // Copy the data into the buffer.
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        if data.len() > 0 {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+            let mut view = buffer.slice(..).get_mapped_range_mut();
+            view.as_mut()
+                .copy_from_slice(bytemuck::cast_slice(data.as_slice()));
+        }
+        buffer.unmap();
+        buffer
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [scene-builder-create-buffer-zero-length-slice]: <kbd>[scene.rs]</kbd> Guard against zero-length slice]
+</script>
+
+Unfortunately we now run into this validation error:
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ bash
+    thread 'main' panicked at src/render.rs:38:13:
+    Aborting due to an error: Validation Error
+
+    Caused by:
+      In Device::create_bind_group, label = 'scene resources'
+          Buffer with 'discs' label binding size is zero
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+wgpu doesn't allow a zero-length buffer to be bound to a bind group at all. This has to do with a
+more fundamental restriction in WebGPU that requires a runtime-sized storage buffer binding to
+have at least one element of the allocated type.[^ch12-footnote1]
+
+An easy workaround for us is to honor that and make sure the buffer has at least one "dummy" element
+even if it logically has zero elements. By default, wgpu ensures that the memory that backs a new
+buffer allocation is cleared to zero. This means that the  dummy disc entry will contain a radius of
+"0" and a normal vector with length "0", so it will fail the intersection test.
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+    fn create_storage_buffer_with_data<T: Pod>(
+        device: &wgpu::Device,
+        data: &Vec<T>,
+        label: Option<&str>,
+    ) -> wgpu::Buffer {
+        // Create the buffer already mapped and initialize data without an explicit transfer.
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+            // Make sure that the allocation is large enough to hold at least one element.
+            size: (std::mem::size_of::<T>() * data.len().max(1)) as u64,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+            usage: wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: true,
+        });
+        // Copy the data into the buffer.
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        if data.len() > 0 {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+            let mut view = buffer.slice(..).get_mapped_range_mut();
+            view.as_mut()
+                .copy_from_slice(bytemuck::cast_slice(data.as_slice()));
+        }
+        buffer.unmap();
+        buffer
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [scene-builder-create-buffer-at-least-one-element]: <kbd>[scene.rs]</kbd> Ensure buffer allocations are large enough to hold at least one element]
+</script>
+
+That should resolve the errors. Let's now add some discs to our new scene:
+
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+    impl Gallery {
+        pub fn new(device: &wgpu::Device, layout: &wgpu::BindGroupLayout) -> Self {
+            let scenes = vec![
+                scene_with_spheres(),
+                another_scene_with_spheres(),
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+                scene_with_discs()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+            ];
+            Self {
+                current_scene_index: scenes.len() - 1,
+                scenes: scenes
+                    .into_iter()
+                    .map(|(camera, builder)| Scene {
+                        camera,
+                        resources: builder.build(device, layout),
+                    })
+                    .collect(),
+            }
+        }
+        ...
+    }
+
+    fn scene_with_spheres() -> (Camera, SceneBuilder) {
+        ...
+    }
+
+    fn another_scene_with_spheres() -> (Camera, SceneBuilder) {
+        ...
+    }
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust delete
+    fn scene_with_shapes() -> (Camera, SceneBuilder) {
+        ...
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+    fn scene_with_discs() -> (Camera, SceneBuilder) {
+        let mut builder = SceneBuilder::default();
+
+        let ground = builder.add_material(Material::lambertian(Vec3::new(1., 0.8, 0.1)));
+        let sphere = builder.add_material(Material::opaque(Vec3::new(0.9, 0.2, 0.4), 0.001));
+        let mirror = builder.add_material(Material::metal(Vec3::all(0.8)));
+
+        let sphere_position = Vec3::new(0., 0.5, 0.);
+        builder.add_sphere(Sphere { center: sphere_position, radius: 0.5 }, sphere);
+        builder.add_disc(
+            Disc {
+                center: Vec3::all(0.),
+                radius: 1000.,
+                normal: Vec3::new(0., 1., 0.)
+            },
+            ground
+        );
+        builder.add_disc(
+            Disc {
+                center: Vec3::new(-0.8, 1., -0.8),
+                radius: 1.,
+                normal: Vec3::new(1., -0.3, 1.).normalized()
+            },
+            mirror
+        );
+        builder.add_disc(
+            Disc {
+                center: Vec3::new(0.8, 1., -0.8),
+                radius: 1.,
+                normal: Vec3::new(-1., -0.3, 1.).normalized()
+            },
+            mirror
+        );
+
+        let camera = Camera::look_at(
+            Vec3::new(0., 1.2, 2.5),
+            Vec3::new(0., 0.5, 0.),
+            Vec3::new(0., 1., 0.)
+        ).with_fov(60_f32.to_radians());
+
+        (camera, builder)
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [scene-to-test-plane]: <kbd>[gallery.rs]</kbd> Scene with discs]
+</script>
+
+  ![Figure [sphere-and-discs]: Sphere resting on a disc with disc-shaped mirrors](../images/img-65-sphere-and-discs.png)
+
+You can repeat this pattern and add multitudes of other shapes to your renderer. As a reference, Iñigo Quilez (of [ShaderToy](https://www.shadertoy.com) and Pixar fame) has written [this article](https://iquilezles.org/articles/intersectors/) with 17 different ray-intersection function examples (check out torus and the "Goursat" for some interesting ones).
+
+
+[^ch12-footnote1]: See https://www.w3.org/TR/WGSL/#buffer-binding-determines-runtime-sized-array-element-count and https://github.com/gfx-rs/wgpu/issues/3170. The overall motivation for this restriction historically had to do with needing to accommodate Vulkan implementation that do not allow zero-length storage buffer bindings.
 <!-- <p class="dinkus"> * * * </p> -->
 <!--
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+    fn create_storage_buffer_with_data<T: Pod>(
+        device: &wgpu::Device,
+        data: &Vec<T>,
+        label: Option<&str>,
+    ) -> wgpu::Buffer {
+        // Create the buffer already mapped and initialize data without an explicit transfer.
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label,
+            size: (std::mem::size_of::<T>() * data.len()) as u64,
+            usage: wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: true,
+        });
+        // Copy the data into the buffer.
+        {
+            let mut view = buffer.slice(..).get_mapped_range_mut();
+            view.as_mut()
+                .copy_from_slice(bytemuck::cast_slice(data.as_slice()));
+        }
+        buffer.unmap();
+        buffer
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 <p class="dinkus">&#x2042;</p>
 
 Great job on making it this far!
@@ -10027,6 +10761,28 @@ When we configured the `wgpu::Surface` earlier on, we set the "present mode" to 
 which is enforced by the call to `surface.get_current_texture()`. I happen to run this on a 120 Hz
 display, so the numbers that I see are in that ballpark. TODO: you'll noteice the numbers are not regular, it's never precise
 
+
+    Snippet on GPU parallel execution
+At first glance, the first approach with different buffers appears more GPU-friendly. We
+briefly discussed "uniform data access" earlier in Book 1, where I mentioned that GPU performance
+is sensitive to data access patterns being uniform across threads that execute together. Equally
+important is the contept that _control flow_ should be uniform. Simply put, the control flow of a
+computer program is the path that it takes when executing instructions. A program can take different paths
+and execute different sequences or instructions based on control flow statements, such as
+function calls, loops, and if-statements.
+
+GPUs execute groups of threads in small bundles that share an instruction pointer and execute
+the same instructions in lockstep. This basic unit of GPU execution has a different name depending
+on the hardware vendor and API framework: NVIDIA calls it a _warp_, AMD calls it a _wavefront_, Vulkan
+calls it a _subgroup_, Apple calls it a _SIMD-group_, etc. Each thread in a warp can see different
+data but they will generally execute the same instructions. I say "generally" because based on the
+control flow, some threads can be masked and ignored.
+
+What happens when a warp encounters an if-else-statement and half the threads in the warp want to
+execute if-branch and the other half the else-branch? The warp will typically execute both branches
+regardless but it will mask half the threads while doing so. In general, this is said to lead to
+poor _utilization_ because the masked threads are wasting resources that could have otherwise done
+more parallel work.
 
 
 Subsections:

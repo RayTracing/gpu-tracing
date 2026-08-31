@@ -4,7 +4,7 @@
 use crate::{
     algebra::Vec3,
     camera::Camera,
-    scene::{Material, SceneBuilder, Sphere},
+    scene::{Disc, Material, SceneBuilder, Sphere},
 };
 
 pub struct Gallery {
@@ -19,7 +19,11 @@ pub struct Scene {
 
 impl Gallery {
     pub fn new(device: &wgpu::Device, layout: &wgpu::BindGroupLayout) -> Self {
-        let scenes = vec![scene_with_spheres(), another_scene_with_spheres()];
+        let scenes = vec![
+            scene_with_spheres(),
+            another_scene_with_spheres(),
+            scene_with_discs()
+        ];
         Self {
             current_scene_index: scenes.len() - 1,
             scenes: scenes
@@ -172,6 +176,50 @@ fn another_scene_with_spheres() -> (Camera, SceneBuilder) {
         Vec3::new(0., 1., 0.),
     )
     .with_fov(30_f32.to_radians());
+
+    (camera, builder)
+}
+
+#[rustfmt::skip]
+fn scene_with_discs() -> (Camera, SceneBuilder) {
+    let mut builder = SceneBuilder::default();
+
+    let ground = builder.add_material(Material::lambertian(Vec3::new(1., 0.8, 0.1)));
+    let sphere = builder.add_material(Material::opaque(Vec3::new(0.9, 0.2, 0.4), 0.001));
+    let mirror = builder.add_material(Material::metal(Vec3::all(0.8)));
+
+    let sphere_position = Vec3::new(0., 0.5, 0.);
+    builder.add_sphere(Sphere { center: sphere_position, radius: 0.5 }, sphere);
+    builder.add_disc(
+        Disc {
+            center: Vec3::all(0.),
+            radius: 1000.,
+            normal: Vec3::new(0., 1., 0.)
+        },
+        ground
+    );
+    builder.add_disc(
+        Disc {
+            center: Vec3::new(-0.8, 1., -0.8),
+            radius: 1.,
+            normal: Vec3::new(1., -0.3, 1.).normalized()
+        },
+        mirror
+    );
+    builder.add_disc(
+        Disc {
+            center: Vec3::new(0.8, 1., -0.8),
+            radius: 1.,
+            normal: Vec3::new(-1., -0.3, 1.).normalized()
+        },
+        mirror
+    );
+
+    let camera = Camera::look_at(
+        Vec3::new(0., 1.2, 2.5),
+        Vec3::new(0., 0.5, 0.),
+        Vec3::new(0., 1., 0.)
+    ).with_fov(60_f32.to_radians());
 
     (camera, builder)
 }

@@ -132,12 +132,43 @@ fn intersect_sphere(ray: Ray, sphere: Sphere) -> Intersection {
   return Intersection(N, t, sphere.material_index);
 }
 
+struct Disc {
+  center: vec3f,
+  radius: f32,
+  normal: vec3f,
+  material_index: u32,
+}
+
+fn intersect_disc(ray: Ray, disc: Disc) -> Intersection {
+  let n_dot_d = dot(disc.normal, ray.direction);
+  if abs(n_dot_d) == 0. {
+    return no_intersection();
+  }
+  let o = disc.center - ray.origin;
+  let t = dot(disc.normal, o) / n_dot_d;
+  if t < EPSILON {
+    return no_intersection();
+  }
+  let p = t * ray.direction - o;
+  if dot(p, p) > disc.radius * disc.radius {
+    return no_intersection();
+  }
+  return Intersection(disc.normal, t, disc.material_index);
+}
+
 fn intersect_scene(ray: Ray) -> Intersection {
   var closest_hit = no_intersection();
   closest_hit.t = FLT_MAX;
   for (var i = 0u; i < arrayLength(&spheres); i += 1u) {
     let sphere = spheres[i];
     let hit = intersect_sphere(ray, sphere);
+    if hit.t > 0. && hit.t < closest_hit.t {
+      closest_hit = hit;
+    }
+  }
+  for (var i = 0u; i < arrayLength(&discs); i += 1u) {
+    let disc = discs[i];
+    let hit = intersect_disc(ray, disc);
     if hit.t > 0. && hit.t < closest_hit.t {
       closest_hit = hit;
     }
@@ -252,6 +283,7 @@ fn sky_color(ray: Ray) -> vec3f {
 
 @group(1) @binding(0) var<storage> materials: array<Material>;
 @group(1) @binding(1) var<storage> spheres: array<Sphere>;
+@group(1) @binding(2) var<storage> discs: array<Disc>;
 
 @group(0) @binding(1) var radiance_samples_old: texture_2d<f32>;
 @group(0) @binding(2) var radiance_samples_new: texture_storage_2d<rgba32float, write>;
