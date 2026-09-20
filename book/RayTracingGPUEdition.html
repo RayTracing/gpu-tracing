@@ -10159,7 +10159,7 @@ Given that we already have a `Disc` type, we can use that to define a new buffer
         }
       }
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
-      for (var i = 0u; i < arrayLength(&spheres); i += 1u) {
+      for (var i = 0u; i < arrayLength(&discs); i += 1u) {
         let disc = discs[i];
         let hit = intersect_disc(ray, disc);
         if hit.t > 0. && hit.t < closest_hit.t {
@@ -10223,7 +10223,7 @@ populates the new buffer:
                         count: None,
                     },
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
-                    // Discs 
+                    // Discs
                     wgpu::BindGroupLayoutEntry {
                         binding: 2,
                         visibility: wgpu::ShaderStages::FRAGMENT,
@@ -10242,7 +10242,7 @@ populates the new buffer:
     }
     ...
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    [Listing [discs-bind-group-entry]: <kbd>[render.rs]</kbd> The `discs` buffer binding]
+    [Listing [discs-bind-group-layout-entry]: <kbd>[render.rs]</kbd> The `discs` buffer binding]
 </script>
 
 <script type="preformatted">
@@ -10330,13 +10330,13 @@ populates the new buffer:
             device: &wgpu::Device,
             layout: &wgpu::BindGroupLayout,
         ) -> wgpu::BindGroup {
-        let material_buffer =
-            create_storage_buffer_with_data(device, &self.materials, Some("materials"));
-        let spheres_buffer =
-            create_storage_buffer_with_data(device, &self.spheres, Some("spheres"));
+            let material_buffer =
+                create_storage_buffer_with_data(device, &self.materials, Some("materials"));
+            let spheres_buffer =
+                create_storage_buffer_with_data(device, &self.spheres, Some("spheres"));
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
-        let discs_buffer =
-            create_storage_buffer_with_data(device, &self.discs, Some("discs"));
+            let discs_buffer =
+                create_storage_buffer_with_data(device, &self.discs, Some("discs"));
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
 
             device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -10435,8 +10435,8 @@ Unfortunately we now run into this validation error:
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 wgpu doesn't allow a zero-length buffer to be bound to a bind group at all. This has to do with a
-more fundamental restriction in WebGPU that requires a runtime-sized storage buffer binding to
-have at least one element of the allocated type.[^ch12-footnote1]
+more fundamental restriction in WebGPU that requires a runtime-sized array binding to be large
+enough to store at least one element of the allocated type.[^ch12-footnote1]
 
 An easy workaround for us is to honor that and make sure the buffer has at least one "dummy" element
 even if it logically has zero elements. By default, wgpu ensures that the memory that backs a new
@@ -10567,10 +10567,316 @@ That should resolve the errors. Let's now add some discs to our new scene:
 
   ![Figure [sphere-and-discs]: Sphere resting on a disc with disc-shaped mirrors](../images/img-65-sphere-and-discs.png)
 
-You can repeat this pattern and add multitudes of other shapes to your renderer. As a reference, Iñigo Quilez (of [ShaderToy](https://www.shadertoy.com) and Pixar fame) has written [this article](https://iquilezles.org/articles/intersectors/) with 17 different ray-intersection function examples (check out torus and the "Goursat" for some interesting ones).
-
 
 [^ch12-footnote1]: See https://www.w3.org/TR/WGSL/#buffer-binding-determines-runtime-sized-array-element-count and https://github.com/gfx-rs/wgpu/issues/3170. The overall motivation for this restriction historically had to do with needing to accommodate Vulkan implementation that do not allow zero-length storage buffer bindings.
+
+
+Scene Uniforms
+--------------
+The solution to the validation error may have felt unsatisfying to some of you. The solution worked because the
+sphere and disc intersection logic happen to logically handle a null entry. However, this ultimately hides the
+fact that `arrayLength` doesn't return the true element count when the length of the array is $0$.
+
+It would be more robust for the shader to know the true element count. We can communicate this to the shader
+with additional uniform data -- as it happens, this is in fact how wgpu implements the `arrayLength` function
+on GPU API backends that don't support such a query to begin with.
+
+The change is quite simple. We'll declare a new `SceneUniforms` data structure for scene metadata. We know
+the number of spheres and discs so we can directly assign them to the uniform buffer in `SceneBuilder::build`.
+Let's also renumber the scene bind group bindings so that the uniforms comes first, followed by the shape buffers.
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    ...
+
+    fn intersect_scene(ray: Ray) -> Intersection {
+      var closest_hit = no_intersection();
+      closest_hit.t = FLT_MAX;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+      for (var i = 0u; i < scene_uniforms.sphere_count; i += 1u) {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+        let sphere = spheres[i];
+        let hit = intersect_sphere(ray, sphere);
+        if hit.t > 0. && hit.t < closest_hit.t {
+          closest_hit = hit;
+        }
+      }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+      for (var i = 0u; i < scene_uniforms.disc_count; i += 1u) {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+        let disc = discs[i];
+        let hit = intersect_disc(ray, disc);
+        if hit.t > 0. && hit.t < closest_hit.t {
+          closest_hit = hit;
+        }
+      }
+      if closest_hit.t < FLT_MAX {
+        return closest_hit;
+      }
+      return no_intersection();
+    }
+
+    ...
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+    struct SceneUniforms {
+      sphere_count: u32,
+      disc_count: u32,
+    }
+    
+    @group(1) @binding(0) var<uniform> scene_uniforms: SceneUniforms;
+    @group(1) @binding(1) var<storage> materials: array<Material>;
+    @group(1) @binding(2) var<storage> spheres: array<Sphere>;
+    @group(1) @binding(3) var<storage> discs: array<Disc>;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+
+    @group(0) @binding(1) var radiance_samples_old: texture_2d<f32>;
+    @group(0) @binding(2) var radiance_samples_new: texture_storage_2d<rgba32float, write>;
+
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [scene-uniforms-binding]: <kbd>[shaders.wgsl]</kbd> The `SceneUniforms` buffer binding]
+</script>
+
+As before, we need to update the bind group layout and the `SceneBuilder`:
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+    fn create_pipeline(
+        device: &wgpu::Device,
+        shader_module: &wgpu::ShaderModule,
+    ) -> (wgpu::RenderPipeline, wgpu::BindGroupLayout, wgpu::BindGroupLayout) {
+        ...
+        let scene_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("scene resource layout"),
+                entries: &[
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+                    // Uniforms
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+                    // Materials
+                    wgpu::BindGroupLayoutEntry {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+                        binding: 1,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    // Spheres
+                    wgpu::BindGroupLayoutEntry {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+                        binding: 2,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    // Discs
+                    wgpu::BindGroupLayoutEntry {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+                        binding: 3,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                  ],
+            });
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        ...
+    }
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [scene-uniforms-bind-group-layout-entry]: <kbd>[render.rs]</kbd> The `SceneUniforms` buffer binding]
+</script>
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+
+    pub struct Sphere {
+        pub center: Vec3,
+        pub radius: f32,
+    }
+
+    pub struct Disc {
+        pub center: Vec3,
+        pub radius: f32,
+        pub normal: Vec3,
+    }
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+    #[derive(Debug, Copy, Clone, Pod, Zeroable)]
+    #[repr(C)]
+    struct SceneUniforms {
+        sphere_count: u32,
+        disc_count: u32,
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+
+    #[derive(Debug, Copy, Clone, Pod, Zeroable)]
+    #[repr(C)]
+    struct SphereBufferEntry {
+        center: Vec3,
+        radius: f32,
+        material_index: u32,
+        _pad: [u32; 3],
+    }
+
+
+    #[derive(Debug, Copy, Clone, Pod, Zeroable)]
+    #[repr(C)]
+    struct DiscBufferEntry {
+        center: Vec3,
+        radius: f32,
+        normal: Vec3,
+        material_index: u32,
+    }
+
+    #[derive(Copy, Clone)]
+    pub struct MaterialId(u32);
+
+    #[derive(Default)]
+    pub struct SceneBuilder {
+        materials: Vec<Material>,
+        spheres: Vec<SphereBufferEntry>,
+        discs: Vec<DiscBufferEntry>,
+    }
+
+    impl SceneBuilder {
+
+        ...
+
+        pub fn build(
+            self,
+            device: &wgpu::Device,
+            layout: &wgpu::BindGroupLayout,
+        ) -> wgpu::BindGroup {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+            let uniform_buffer = create_uniform_buffer_with_data(
+                device,
+                SceneUniforms {
+                    sphere_count: self.spheres.len() as u32,
+                    disc_count: self.discs.len() as u32,
+                },
+                Some("scene uniforms")
+            );
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+            let material_buffer =
+                create_storage_buffer_with_data(device, &self.materials, Some("materials"));
+            let spheres_buffer =
+                create_storage_buffer_with_data(device, &self.spheres, Some("spheres"));
+            let discs_buffer =
+                create_storage_buffer_with_data(device, &self.discs, Some("discs"));
+
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("scene resources"),
+                layout,
+                entries: &[
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &uniform_buffer,
+                            offset: 0,
+                            size: None,
+                        }),
+                    },
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+                    wgpu::BindGroupEntry {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+                        binding: 1,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &material_buffer,
+                            offset: 0,
+                            size: None,
+                        }),
+                    },
+                    wgpu::BindGroupEntry {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+                        binding: 2,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &spheres_buffer,
+                            offset: 0,
+                            size: None,
+                        }),
+                    },
+                    wgpu::BindGroupEntry {
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+                        binding: 3,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &discs_buffer,
+                            offset: 0,
+                            size: None,
+                        }),
+                    },
+                ],
+            })
+        }
+    }
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+    fn create_uniform_buffer_with_data<T: Pod>(
+        device: &wgpu::Device,
+        data: T,
+        label: Option<&str>,
+    ) -> wgpu::Buffer {
+        // Create the buffer already mapped and initialize data without an explicit transfer.
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label,
+            size: std::mem::size_of::<T>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM,
+            mapped_at_creation: true,
+        });
+        // Copy the data into the buffer.
+        {
+            let mut view = buffer.slice(..).get_mapped_range_mut();
+            view.as_mut().copy_from_slice(bytemuck::bytes_of(&data));
+        }
+        buffer.unmap();
+        buffer
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+
+    fn create_storage_buffer_with_data<T: Pod>(
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [scene-builder-build-with-scene-uniforms]: <kbd>[scene.rs]</kbd> Computing `SceneUniforms`]
+</script>
+
+If number of spheres or discs is 0, the uniform buffer will correctly reflect that. The uniform buffer
+is a useful place to store scene-specific metadata in general and we'll make use of it more later.
+
 <!-- <p class="dinkus"> * * * </p> -->
 <!--
 

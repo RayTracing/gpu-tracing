@@ -52,6 +52,13 @@ pub struct Disc {
 
 #[derive(Debug, Copy, Clone, Pod, Zeroable)]
 #[repr(C)]
+struct SceneUniforms {
+    sphere_count: u32,
+    disc_count: u32,
+}
+
+#[derive(Debug, Copy, Clone, Pod, Zeroable)]
+#[repr(C)]
 struct SphereBufferEntry {
     center: Vec3,
     radius: f32,
@@ -109,6 +116,14 @@ impl SceneBuilder {
         device: &wgpu::Device,
         layout: &wgpu::BindGroupLayout,
     ) -> wgpu::BindGroup {
+        let uniform_buffer = create_uniform_buffer_with_data(
+            device,
+            SceneUniforms {
+                sphere_count: self.spheres.len() as u32,
+                disc_count: self.discs.len() as u32,
+            },
+            Some("scene uniforms")
+        );
         let material_buffer =
             create_storage_buffer_with_data(device, &self.materials, Some("materials"));
         let spheres_buffer =
@@ -123,7 +138,7 @@ impl SceneBuilder {
                 wgpu::BindGroupEntry {
                     binding: 0,
                     resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                        buffer: &material_buffer,
+                        buffer: &uniform_buffer,
                         offset: 0,
                         size: None,
                     }),
@@ -131,13 +146,21 @@ impl SceneBuilder {
                 wgpu::BindGroupEntry {
                     binding: 1,
                     resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                        buffer: &spheres_buffer,
+                        buffer: &material_buffer,
                         offset: 0,
                         size: None,
                     }),
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &spheres_buffer,
+                        offset: 0,
+                        size: None,
+                    }),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
                     resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
                         buffer: &discs_buffer,
                         offset: 0,
@@ -147,6 +170,27 @@ impl SceneBuilder {
             ],
         })
     }
+}
+
+fn create_uniform_buffer_with_data<T: Pod>(
+    device: &wgpu::Device,
+    data: T,
+    label: Option<&str>,
+) -> wgpu::Buffer {
+    // Create the buffer already mapped and initialize data without an explicit transfer.
+    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label,
+        size: std::mem::size_of::<T>() as u64,
+        usage: wgpu::BufferUsages::UNIFORM,
+        mapped_at_creation: true,
+    });
+    // Copy the data into the buffer.
+    {
+        let mut view = buffer.slice(..).get_mapped_range_mut();
+        view.as_mut().copy_from_slice(bytemuck::bytes_of(&data));
+    }
+    buffer.unmap();
+    buffer
 }
 
 fn create_storage_buffer_with_data<T: Pod>(
