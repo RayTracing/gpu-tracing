@@ -50,11 +50,20 @@ pub struct Disc {
     pub normal: Vec3,
 }
 
+pub struct Box {
+    pub origin: Vec3,
+    pub extent: Vec3,
+    pub v0: Vec3,
+    pub v1: Vec3,
+    pub v2: Vec3,
+}
+
 #[derive(Debug, Copy, Clone, Pod, Zeroable)]
 #[repr(C)]
 struct SceneUniforms {
     sphere_count: u32,
     disc_count: u32,
+    box_count: u32,
 }
 
 #[derive(Debug, Copy, Clone, Pod, Zeroable)]
@@ -75,6 +84,21 @@ struct DiscBufferEntry {
     material_index: u32,
 }
 
+#[derive(Debug, Copy, Clone, Pod, Zeroable)]
+#[repr(C)]
+struct BoxBufferEntry {
+    origin: Vec3,
+    _pad0: u32,
+    extent: Vec3,
+    _pad1: u32,
+    v0: Vec3,
+    _pad2: u32,
+    v1: Vec3,
+    _pad3: u32,
+    v2: Vec3,
+    material_index: u32,
+}
+
 #[derive(Copy, Clone)]
 pub struct MaterialId(u32);
 
@@ -83,6 +107,7 @@ pub struct SceneBuilder {
     materials: Vec<Material>,
     spheres: Vec<SphereBufferEntry>,
     discs: Vec<DiscBufferEntry>,
+    boxes: Vec<BoxBufferEntry>,
 }
 
 impl SceneBuilder {
@@ -111,6 +136,22 @@ impl SceneBuilder {
         self.discs.push(entry)
     }
 
+    pub fn add_box(&mut self, box_: Box, material: MaterialId) {
+        let entry = BoxBufferEntry {
+            origin: box_.origin,
+            _pad0: 0,
+            extent: box_.extent,
+            _pad1: 0,
+            v0: box_.v0,
+            _pad2: 0,
+            v1: box_.v1,
+            _pad3: 0,
+            v2: box_.v2,
+            material_index: material.0,
+        };
+        self.boxes.push(entry)
+    }
+
     pub fn build(
         self,
         device: &wgpu::Device,
@@ -121,6 +162,7 @@ impl SceneBuilder {
             SceneUniforms {
                 sphere_count: self.spheres.len() as u32,
                 disc_count: self.discs.len() as u32,
+                box_count: self.boxes.len() as u32,
             },
             Some("scene uniforms")
         );
@@ -130,6 +172,8 @@ impl SceneBuilder {
             create_storage_buffer_with_data(device, &self.spheres, Some("spheres"));
         let discs_buffer =
             create_storage_buffer_with_data(device, &self.discs, Some("discs"));
+        let boxes_buffer =
+            create_storage_buffer_with_data(device, &self.boxes, Some("boxes"));
 
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("scene resources"),
@@ -163,6 +207,14 @@ impl SceneBuilder {
                     binding: 3,
                     resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
                         buffer: &discs_buffer,
+                        offset: 0,
+                        size: None,
+                    }),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &boxes_buffer,
                         offset: 0,
                         size: None,
                     }),

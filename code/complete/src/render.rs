@@ -240,6 +240,17 @@ fn create_pipeline(
                     },
                     count: None,
                 },
+                // Boxes
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
         });
     let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {

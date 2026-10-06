@@ -56,19 +56,18 @@ algorithms. While I was ramping back up on theory nearly a decade after my first
 simple CPU path tracer while teaching some theory. I found the self-guided "show, then tell" approach refreshing.
 Then I decided that there should be a similar book for building a GPU path tracer too!
 
-This book is an introduction to GPU programming that focuses on building a simple GPU accelerated path tracer.
-It will help you build a simple renderer that can produce high quality and correct images using a fairly. It
-won't be full-featured and its performance will be limited, however it will expose
+This book is an introduction to GPU programming by means of building a simple GPU accelerated path tracer.
+While this won't be full-featured and its performance will be limited, however it will expose
 you to several fundamental GPU programming concepts. By the end, the renderer you'll have built can
 serve as a great starting point for extensions and experiments with more advanced GPU techniques. We will
 avoid most optimizations in favor of simplicity but the renderer will be able to achieve interactive
 frame rates on a decent GPU when targeting simple scenes.[^ch1] The accompanying code intentionally
-avoids hardware ray tracing APIs that are present on newer GPU models, instead focusing on
+avoids hardware ray tracing APIs that are present on newer GPUs, instead focusing on
 implementing the same functionality on a programmable GPU unit using a shading language.
 
 This book follows a similar progression to [_Ray Tracing In One Weekend_][RTIOW]. It covers some of
 the same material but I highly recommend completing _RTIOW_ before embarking on building
-the GPU version. Doing so will teach you the path tracing algorithm in a much more approachable
+the GPU version. Doing so will teach you the path tracing algorithm in a more approachable
 way and it will make you appreciate both the advantages and challenges of moving to a GPU-based
 architecture.
 
@@ -3646,8 +3645,9 @@ We can see some reflections but there are some nasty circular bands. This artifa
 floating point arithmetic. Sometimes the computed intersection point doesn't fall precisely on the
 sphere surface, which can cause the new ray (originating from that point) to re-intersect the sphere.
 
-A simple way to deal with this is to reject intersections for values of $t$ that are below a small
-offset ($\epsilon$ or _epsilon_):
+A simple way to deal with this is to lift the intersection point slightly above the surface when
+assigning the scattered ray origin. This is as simple as displacing the point along surface normal by
+a small offset ($\epsilon$ or _epsilon_):
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
     const FLT_MAX: f32 = 3.40282346638528859812e+38;
@@ -3657,41 +3657,25 @@ offset ($\epsilon$ or _epsilon_):
 
     ...
 
-    fn intersect_sphere(ray: Ray, sphere: Sphere) -> Intersection {
-      let v = ray.origin - sphere.center;
-      let a = dot(ray.direction, ray.direction);
-      let b = dot(v, ray.direction);
-      let c = dot(v, v) - sphere.radius * sphere.radius;
+    struct Scatter {
+      attenuation: vec3f,
+      ray: Ray,
+    }
 
-      let d = b * b - a * c;
-      if d < 0. {
-        return no_intersection();
-      }
-
-      let sqrt_d = sqrt(d);
-      let recip_a = 1. / a;
-      let mb = -b;
-      let t1 = (mb - sqrt_d) * recip_a;
-      let t2 = (mb + sqrt_d) * recip_a;
+    fn scatter(input_ray: Ray, hit: Intersection) -> Scatter {
+      let scattered = reflect(input_ray.direction, hit.normal);
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
-      let t = select(t2, t1, t1 > EPSILON);
-      if t <= EPSILON {
+      let output_ray = Ray(point_on_ray(input_ray, hit.t) + hit.normal * EPSILON, scattered);
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
-        return no_intersection();
-      }
-
-      let p = point_on_ray(ray, t);
-      let N = (p - sphere.center) / sphere.radius;
-      return Intersection(N, t);
+      let attenuation = vec3(0.4);
+      return Scatter(attenuation, output_ray);
     }
 
     ...
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    [Listing [intersect-scene]: <kbd>[shaders.wgsl]</kbd> Rejecting intersections too close to the ray origin]
+    [Listing [shadow-acne-fix]: <kbd>[shaders.wgsl]</kbd> Mitigate self-intersection by offsetting the ray origin]
 
-The code considers both `t1` and `t2` as `t2` (the farther point) could be a valid intersection if
-the ray originated inside the sphere (e.g. for a glass-like material). Following this
-change, the rendering should look like this:
+Following this change, the rendering should look like this:
 
   ![Figure [shadow-acne-fixed]: Validating the path tracing loop
    ](../images/img-19-mirror-reflection-no-acne.png)
@@ -3764,7 +3748,7 @@ they receive.
     ...
     fn scatter(input_ray: Ray, hit: Intersection) -> Scatter {
       let scattered = reflect(input_ray.direction, hit.normal);
-      let output_ray = Ray(point_on_ray(input_ray, hit.t), scattered);
+      let output_ray = Ray(point_on_ray(input_ray, hit.t) + hit.normal * EPSILON, scattered);
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
       let attenuation = vec3(1.);
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
@@ -3888,7 +3872,7 @@ intersection routine return the color of a sphere and use that color in the scat
     ...
     fn scatter(input_ray: Ray, hit: Intersection) -> Scatter {
       let scattered = reflect(input_ray.direction, hit.normal);
-      let output_ray = Ray(point_on_ray(input_ray, hit.t), scattered);
+      let output_ray = Ray(point_on_ray(input_ray, hit.t) + hit.normal * EPSILON, scattered);
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
       let attenuation = hit.color;
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
@@ -5502,7 +5486,7 @@ there instead. We'll declare a separate array to store the `Material` instances 
     fn scatter(input_ray: Ray, hit: Intersection, material: Material) -> Scatter {
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
       let scattered = reflect(input_ray.direction, hit.normal);
-      let output_ray = Ray(point_on_ray(input_ray, hit.t), scattered);
+      let output_ray = Ray(point_on_ray(input_ray, hit.t) + hit.normal * EPSILON, scattered);
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
       let attenuation = material.color;
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
@@ -5803,7 +5787,7 @@ Now let's update `scatter`:
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
       let scattered = normalize(hit.normal + (1. - EPSILON) * sample_sphere());
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
-      let output_ray = Ray(point_on_ray(input_ray, hit.t), scattered);
+      let output_ray = Ray(point_on_ray(input_ray, hit.t) + hit.normal * EPSILON, scattered);
       let attenuation = material.color;
       return Scatter(attenuation, output_ray);
     }
@@ -5852,7 +5836,7 @@ with both types of material with various colors:
         scattered = sample_lambertian(hit.normal);
       }
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
-      let output_ray = Ray(point_on_ray(input_ray, hit.t), scattered);
+      let output_ray = Ray(point_on_ray(input_ray, hit.t) + hit.normal * EPSILON, scattered);
       let attenuation = material.color;
       return Scatter(attenuation, output_ray);
     }
@@ -6030,22 +6014,27 @@ air/glass interface. The color is set to `vec3(1.)`, so the material should tran
 
 Let's now update the scatter function. Once again we're in luck: just like `reflect`, WGSL defines an intrinsic called
 `refract` to compute the refracted ray for an incident ray direction, a surface normal, and a relative index of
-refraction. Let's plug this into our `scatter` function:
+refraction. Let's plug this into our `scatter` function. We also need to make sure that the small offset we applied
+to prevent self-intersection pushes the origin below the surface for a refracted ray and not above it:
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
     ...
     fn scatter(input_ray: Ray, hit: Intersection, material: Material) -> Scatter {
       var scattered: vec3f;
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+      var offset = EPSILON;
       if material.ior > 0. {
         scattered = refract(input_ray.direction, hit.normal, material.ior);
+        offset *= -1;
       } else if material.specular == 1 {
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
         scattered = reflect(input_ray.direction, hit.normal);
       } else {
         scattered = sample_lambertian(hit.normal);
       }
-      let output_ray = Ray(point_on_ray(input_ray, hit.t), scattered);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+      let output_ray = Ray(point_on_ray(input_ray, hit.t) + hit.normal * offset, scattered);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
       let attenuation = material.color;
       return Scatter(attenuation, output_ray);
     }
@@ -6082,10 +6071,13 @@ direction, so let's update our code to explicitly normalize it:
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
       let incident = normalize(input_ray.direction);
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+      var scattered: vec3f;
+      var offset = EPSILON;
       if material.ior > 0. {
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
         scattered = refract(incident, hit.normal, material.ior);
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+        offset *= -1;
       } else if material.specular == 1 {
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
         scattered = reflect(incident, hit.normal);
@@ -6093,7 +6085,7 @@ direction, so let's update our code to explicitly normalize it:
       } else {
         scattered = sample_lambertian(hit.normal);
       }
-      let output_ray = Ray(point_on_ray(input_ray, hit.t), scattered);
+      let output_ray = Ray(point_on_ray(input_ray, hit.t) + hit.normal * offset, scattered);
       let attenuation = material.color;
       return Scatter(attenuation, output_ray);
     }
@@ -6134,8 +6126,8 @@ of the path tracing loop. Let's look back at `intersect_sphere`:
       let mb = -b;
       let t1 = (mb - sqrt_d) * recip_a;
       let t2 = (mb + sqrt_d) * recip_a;
-      let t = select(t2, t1, t1 > EPSILON);
-      if t <= EPSILON {
+      let t = select(t2, t1, t1 > 0.);
+      if t <= 0. {
         return no_intersection();
       }
 
@@ -6162,7 +6154,7 @@ as _unordered_, meaning that boolean comparison operators (i.e. `<`, `<=`, `>=`,
 an operand is NaN.[^ch9-footnote13]
 
 Following these rules, we should expect `recip_a` to be `+INF`. Since `d` and `b` are both zero, so are `sqrt_d` and `mb`,
-which should cause `t1`, `t2`, and `t` to be `NaN`. `t <= EPSILON` would evaluate to false and NaNs would propagate through
+which should cause `t1`, `t2`, and `t` to be `NaN`. `t <= 0.` would evaluate to false and NaNs would propagate through
 the rest of the function. Fortunately, `intersect_scene` should treat this as "no intersection" (since
 the `hit.t > 0. && hit.t < closest_hit.t` check would evaluate to false. Because the procedure doesn't find any intersections,
 it moves on to compute the sky color with a null ray direction. The first thing that `sky_color` does with
@@ -6234,6 +6226,7 @@ the inequality can then be computed as `ior * ior * (1.0 - abs(dot(incident, hit
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
 
       var scattered: vec3f;
+      var offset = EPSILON;
       if material.ior > 0. {
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
         let ior = material.ior;
@@ -6242,6 +6235,7 @@ the inequality can then be computed as `ior * ior * (1.0 - abs(dot(incident, hit
           scattered = reflect(incident, hit.normal);
         } else {
           scattered = refract(incident, hit.normal, ior);
+          offset *= -1;
         }
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
       } else if material.specular == 1 {
@@ -6249,7 +6243,7 @@ the inequality can then be computed as `ior * ior * (1.0 - abs(dot(incident, hit
       } else {
         scattered = sample_lambertian(hit.normal);
       }
-      let output_ray = Ray(point_on_ray(input_ray, hit.t), scattered);
+      let output_ray = Ray(point_on_ray(input_ray, hit.t) + hit.normal * offset, scattered);
       let attenuation = material.color;
       return Scatter(attenuation, output_ray);
     }
@@ -6293,6 +6287,8 @@ vector when the intersection is on the back face, so that material evaluation us
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
       let cos_theta = abs(incident_dot_normal);
 
+      var scattered: vec3f;
+      var offset = EPSILON;
       if material.ior > 0. {
         let ior = material.ior;
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
@@ -6302,6 +6298,7 @@ vector when the intersection is on the back face, so that material evaluation us
           scattered = reflect(incident, N);
         } else {
           scattered = refract(incident, N, ref_ratio);
+          offset *= -1;
         }
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
       } else if material.specular == 1 {
@@ -6313,7 +6310,9 @@ vector when the intersection is on the back face, so that material evaluation us
         scattered = sample_lambertian(N);
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
       }
-      let output_ray = Ray(point_on_ray(input_ray, hit.t), scattered);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+      let output_ray = Ray(point_on_ray(input_ray, hit.t) + N * offset, scattered);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
       let attenuation = material.color;
       return Scatter(attenuation, output_ray);
     }
@@ -6353,16 +6352,18 @@ things clean when we later introduce other situations that can result in a specu
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
 
       var scattered: vec3f;
+      var offset = EPSILON;
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
       if material.specular == 1 || (is_transmissive && cannot_refract) {
         scattered = reflect(incident, N);
       } else if is_transmissive {
         scattered = refract(incident, N, ref_ratio);
+        offset *= -1;
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
       } else {
         scattered = sample_lambertian(N);
       }
-      let output_ray = Ray(point_on_ray(input_ray, hit.t), scattered);
+      let output_ray = Ray(point_on_ray(input_ray, hit.t) + N * offset, scattered);
       let attenuation = material.color;
       return Scatter(attenuation, output_ray);
     }
@@ -6530,16 +6531,18 @@ reflection over other scattering types and factor in the Fresnel-weighted probab
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
 
       var scattered: vec3f;
+      var offset = EPSILON;
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
       if choose_specular {
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
         scattered = reflect(incident, N);
       } else if is_transmissive {
         scattered = refract(incident, N, ref_ratio);
+        offset *= -1;
       } else {
         scattered = sample_lambertian(N);
       }
-      let output_ray = Ray(point_on_ray(input_ray, hit.t), scattered);
+      let output_ray = Ray(point_on_ray(input_ray, hit.t) + N * offset, scattered);
       let attenuation = material.color;
       return Scatter(attenuation, output_ray);
     }
@@ -6615,14 +6618,16 @@ angle:
       }
 
       var scattered: vec3f;
+      var offset = EPSILON;
       if choose_specular {
         scattered = reflect(incident, N);
       } else if is_transmissive {
         scattered = refract(incident, N, ref_ratio);
+        offset *= -1;
       } else {
         scattered = sample_lambertian(N);
       }
-      let output_ray = Ray(point_on_ray(input_ray, hit.t), scattered);
+      let output_ray = Ray(point_on_ray(input_ray, hit.t) + N * offset, scattered);
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL delete
       let attenuation = material.color;
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
@@ -6691,14 +6696,16 @@ which isn't particularly creative but clearly conveys the intent:
       }
 
       var scattered: vec3f;
+      var offset = EPSILON;
       if choose_specular {
         scattered = reflect(incident, N);
       } else if is_transmissive {
         scattered = refract(incident, N, ref_ratio);
+        offset *= -1;
       } else {
         scattered = sample_lambertian(N);
       }
-      let output_ray = Ray(point_on_ray(input_ray, hit.t), scattered);
+      let output_ray = Ray(point_on_ray(input_ray, hit.t) + N * offset, scattered);
       return Scatter(attenuation, output_ray);
     }
     ...
@@ -6773,14 +6780,16 @@ that we used to blend between specular reflection and specular transmission for 
       }
 
       var scattered: vec3f;
+      var offset = EPSILON;
       if choose_specular {
         scattered = reflect(incident, N);
       } else if is_transmissive {
         scattered = refract(incident, N, ref_ratio);
+        offset *= -1;
       } else {
         scattered = sample_lambertian(N);
       }
-      let output_ray = Ray(point_on_ray(input_ray, hit.t), scattered);
+      let output_ray = Ray(point_on_ray(input_ray, hit.t) + N * offset, scattered);
       let attenuation = material.color;
       return Scatter(attenuation, output_ray);
     }
@@ -9865,26 +9874,27 @@ We'll map these two actions to the "left arrow" and "right arrow" keys:
 You can now use the left and right arrow keys to navigate between your scenes.
 
 
-Shapes
-======
+Flat Shapes
+===========
 Spheres are often the first objects people implement when building a ray tracer. A sphere has a well-known
-implicit equation and that makes ray-sphere intersection easy to formulate. It also has a curved
-surface which is handy when evaluating variations in reflectance. Then again a sphere is one of many
-geometric shapes with an implicit formula and it's about time we added some variety to our renderer.
+implicit equation that makes ray-sphere intersection easy to formulate. It also has a curved
+surface which is handy when evaluating variations in reflectance. Then again, many common objects
+involve flat faces with no curvature. Fortunately, it is just as easy to model the intersection between
+a ray and a planar surface.
 
 Ray-Plane Intersection
 ----------------------
-The next logical alternative to a round ball is a flat surface. An infinite plane is a 2-dimensional
-object that divides 3D space into two subregions. A plane can be defined by simply a normal vector (which
-is the same across the entire plane) and a point in 3D space that is on the plane. The point implicitly
+An infinite plane is a 2-dimensional object that divides 3D space into two subregions. A plane can be
+defined by simply a normal vector (which is the same across the entire plane) and a point in 3D space that
+is on the plane. The point implicitly
 defines where the plane intersects the 3D space, though there are infinite such points. For an infinite
-plane, the can also be expressed with a scalar displacement that represents how far the plane is
+plane, this point can also be expressed with a scalar displacement that represents how far the plane is
 offset from the origin along the normal vector.
 
 
-![Figure [plane-intersecting-origin]: A plane defined by point $\mathbf{Q}$ and normal $\vec{\mathbf{N}}$. Here $\mathbf{Q}$ is located at the origin of the coordinate axes.](../images/fig-23-infinite-plane.svg)
+![Figure [plane-intersecting-origin]: A plane defined by point $\mathbf{Q}$ and normal $\vec{\mathbf{N}}$. Here $\mathbf{Q}$ is located at the origin of the coordinate axes.](../images/fig-24-infinite-plane.svg)
 
-Given a plane defined by point $\mathbf{Q}$ and normal $\vec{\mathbf{N}}$, then any point $\mathbf{X}$
+Given a plane defined by point $\mathbf{Q}$ and normal $\vec{\mathbf{N}}$, then a point $\mathbf{X}$
 is on the plane if
 
   $$ \vec{\mathbf{N}} \cdot (\mathbf{X} - \mathbf{Q}) = 0 $$
@@ -9921,7 +9931,7 @@ program:
             let scenes = vec![
                 scene_with_spheres(),
                 another_scene_with_spheres(),
-                scene_with_shapes()
+                scene_with_plane()
             ];
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
             Self {
@@ -9948,7 +9958,7 @@ program:
 
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
-    fn scene_with_shapes() -> (Camera, SceneBuilder) {
+    fn scene_with_plane() -> (Camera, SceneBuilder) {
         let mut builder = SceneBuilder::default();
 
         let ground = builder.add_material(Material::lambertian(Vec3::new(1., 0.8, 0.1)));
@@ -9983,7 +9993,7 @@ program:
         return no_intersection();
       }
       let t = dot(normal, center - ray.origin) / n_dot_d;
-      if t < EPSILON {
+      if t <= 0. {
         return no_intersection();
       }
       return Intersection(normal, t, material);
@@ -10050,7 +10060,7 @@ exceeds the radius:
         return no_intersection();
       }
       let t = dot(disc.normal, disc.center - ray.origin) / n_dot_d;
-      if t < EPSILON {
+      if t <= 0. {
         return no_intersection();
       }
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
@@ -10095,7 +10105,7 @@ exceeds the radius:
 
   ![Figure [sphere-and-ground-disc]: Sphere resting on a disc](../images/img-64-sphere-and-ground-disc.png)
 
-Note that we can slightly optimize the intersection logic by comparing squared distance and thus avoid
+Note that we can slightly optimize the intersection logic by comparing squared distance and avoid
 an expensive square-root operation that is implicit in the `length` intrinsic. We can also compute
 `disc.center - ray.origin` once and reuse it:
 
@@ -10118,7 +10128,7 @@ an expensive square-root operation that is implicit in the `length` intrinsic. W
       let o = disc.center - ray.origin;
       let t = dot(disc.normal, o) / n_dot_d;
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
-      if t < EPSILON {
+      if t <= 0. {
         return no_intersection();
       }
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
@@ -10135,7 +10145,7 @@ an expensive square-root operation that is implicit in the `length` intrinsic. W
 </script>
 
 A disc can represent a flat ground that stretches to the horizon just as well. Just increase the radius to
-something really large, like $1,000$ or more.
+something really large (e.g. $1000$).
 
 The next step is to incorporate the disc into the scene representation that both `SceneBuilder` and the
 shader program can understand. A scene currently consists of one GPU buffer that contains a list of spheres.
@@ -10377,7 +10387,7 @@ populates the new buffer:
     [Listing [scene-builder-build-with-discs]: <kbd>[scene.rs]</kbd> `SceneBuilder::add_disc`]
 </script>
 
-That was all the necessary boilerplate. However, there is one more wrinkle we need to deal with. If
+That was all the necessary boilerplate. However, there is a wrinkle we need to deal with. If
 you run the program now, it will crash with this validation error:
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ bash
@@ -10388,8 +10398,8 @@ you run the program now, it will crash with this validation error:
 The bug is in the `create_storage_buffer_with_data` function which tries to obtain a slice over a
 zero-length buffer and wgpu doesn't like that. We haven't had a scene that caused an empty buffer
 until now since they all have at least one sphere in them. Now we have discs in the mix but it would
-be annoying to require every scene to contain at least one disc. That won't scale well with more
-objects types coming soon. So we should generally allow these scene buffers to be empty.
+be annoying to require every scene to contain at least one disc. So we should generally allow these
+scene buffers to be empty.
 
 Let's guard against the slice call and avoid it if the buffer size is 0:
 
@@ -10440,8 +10450,8 @@ enough to store at least one element of the allocated type.[^ch12-footnote1]
 
 An easy workaround for us is to honor that and make sure the buffer has at least one "dummy" element
 even if it logically has zero elements. By default, wgpu ensures that the memory that backs a new
-buffer allocation is cleared to zero. This means that the  dummy disc entry will contain a radius of
-"0" and a normal vector with length "0", so it will fail the intersection test.
+buffer allocation is cleared to zero. This means that the dummy disc entry will contain a radius of
+$0$ and a normal vector with length $0$. This means that it will always fail the intersection test.
 
 <script type="preformatted">
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
@@ -10515,7 +10525,7 @@ That should resolve the errors. Let's now add some discs to our new scene:
 
 
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust delete
-    fn scene_with_shapes() -> (Camera, SceneBuilder) {
+    fn scene_with_plane() -> (Camera, SceneBuilder) {
         ...
     }
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
@@ -10573,9 +10583,9 @@ That should resolve the errors. Let's now add some discs to our new scene:
 
 Scene Uniforms
 --------------
-The solution to the validation error may have felt unsatisfying to some of you. The solution worked because the
-sphere and disc intersection logic happen to logically handle a null entry. However, this ultimately hides the
-fact that `arrayLength` doesn't return the true element count when the length of the array is $0$.
+The solution to the validation error worked because the sphere and disc intersection logic happen to
+logically handle a null entry. However, this ultimately hides the
+fact that `arrayLength` doesn't return the true element count when the length of the array should be $0$.
 
 It would be more robust for the shader to know the true element count. We can communicate this to the shader
 with additional uniform data -- as it happens, this is in fact how wgpu implements the `arrayLength` function
@@ -10583,7 +10593,7 @@ on GPU API backends that don't support such a query to begin with.
 
 The change is quite simple. We'll declare a new `SceneUniforms` data structure for scene metadata. We know
 the number of spheres and discs so we can directly assign them to the uniform buffer in `SceneBuilder::build`.
-Let's also renumber the scene bind group bindings so that the uniforms comes first, followed by the shape buffers.
+Let's also renumber the scene bind group bindings so that the uniforms come first, followed by the shape buffers.
 
 <script type="preformatted">
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
@@ -10874,8 +10884,1041 @@ As before, we need to update the bind group layout and the `SceneBuilder`:
     [Listing [scene-builder-build-with-scene-uniforms]: <kbd>[scene.rs]</kbd> Computing `SceneUniforms`]
 </script>
 
-If number of spheres or discs is 0, the uniform buffer will correctly reflect that. The uniform buffer
-is a useful place to store scene-specific metadata in general and we'll make use of it more later.
+If the number of spheres or discs is 0, the uniform buffer will correctly reflect that. The uniform buffer
+is a useful place to store scene-specific metadata in general and we'll make more use of it later.
+
+
+Box
+---
+The next shape we'll add to our toolbox is the _box_. In general, a physical box can be shaped like
+anything, though here I'm using it to really mean a rectangular prism. Following this definition,
+a box has 6 flat faces and 12 edges where those faces meet. Adjacent faces (i.e. those that share
+an edge) are perpendicular to each other while opposite faces (i.e. those that do not share an
+edge) are parallel.
+
+![Figure [box-geometry]: A cube and a rectangular prism](../images/fig-25-box-geometry.svg)
+
+Imagine two parallel planes in 3D space. Now consider the space between the two planes. This region
+with finite thickness (equal to the distance between the planes) and infinite extent is called a
+_slab_. Now, if you consider that each face of a box lies on an infinite plane and that every
+opposing pair of faces lie on two parallel planes that form a slab, then we can define the box
+as the volume where 3 perpendicular slabs intersect.
+
+
+![Figure [box-and-slabs]: The 3 slabs that define a cube, each shown with a different color. The shaded box faces and dashed lines lie on the bounding planes of a slab](../images/fig-26-box-and-slabs.svg)
+
+Following this definition, a ray intersects a box if it intersects all 3 slabs within the box
+volume. It's actually possible for a ray to intersect all 3 slabs without intersecting the box. What's
+important is that the intersections with the slabs themselves all intersect each other.
+
+This technique is widely known as the _slab method_.[^ch12-footnote2] It involves the following
+steps: First, test all slabs for a ray intersection. A ray intersects a slab if either
+
+1. It intersects at least one of the bounding planes (one is enough if the ray origin is inside the
+   slab); or
+2. The ray is parallel to the bounding planes but its origin is inside the slab.
+
+In the case of 1), the intersection forms a line segment between the two points where the ray enters
+and exits the slab (or its origin if it is inside the slab). In the case of 2), the intersection
+forms a line that is infinite. There is no intersection if the ray doesn't intersect all 3 slabs.
+
+Next, check if all line segments that form the ray-slab intersections overlap. There is no
+intersection unless all 3 segments overlap. Since all line segments are on the ray, they can be
+defined in terms of a pair of $t$ parameters. To test for overlap, we can simply compare the
+$t$-pairs. Each line segment is bounded by $t_{min}$ and $t_{max}$ along the ray. For them all to
+overlap, all $t_{min}$ values must be less than all $t_{max}$.
+
+![Figure [ray-box-intersection]: Different intersection scenarios are illustrated in 2D. The segments don't overlap unless all $t_{min}$ are smaller than all $t_{max}$. When a ray is parallel to a slab, then its origin must be inside it to intersect.](../images/fig-27-ray-box-intersection.svg)
+
+To represent a slab we need two pieces of information: the orientation of the slab and its extents.
+We'll define the orientation as a unit vector, rooted at an "origin" point that corresponds to one of the
+corners of the box. The extent can be defined as a scalar that represents a distance along the vector away
+from the origin. The extents for the 3 slabs together can be stored in the 3 components of a `vec3f`.
+In total, this gives us 3 unit vectors, one "origin" point, and a vector of extents.
+
+It's useful to imagine the 3 unit vectors as coordinate axes (or basis vectors) rooted at the origin point
+as illustrated in Figure [box-definition].
+
+![Figure [box-definition]: Parameters of the box shape](../images/fig-28-box-definition.svg)
+
+Let's implement the intersection function along with an empty new scene. As before, we'll start with
+a hard-coded box before extending the scene definition.
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+    impl Gallery {
+        pub fn new(device: &wgpu::Device, layout: &wgpu::BindGroupLayout) -> Self {
+            let scenes = vec![
+                scene_with_spheres(),
+                another_scene_with_spheres(),
+                scene_with_discs(),
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+                scene_with_boxes()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+            ];
+            Self {
+                current_scene_index: scenes.len() - 1,
+                scenes: scenes
+                    .into_iter()
+                    .map(|(camera, builder)| Scene {
+                        camera,
+                        resources: builder.build(device, layout),
+                    })
+                    .collect(),
+            }
+        }
+        ...
+    }
+
+    fn scene_with_spheres() -> (Camera, SceneBuilder) {
+        ...
+    }
+
+    fn another_scene_with_spheres() -> (Camera, SceneBuilder) {
+        ...
+    }
+
+
+    fn scene_with_discs() -> (Camera, SceneBuilder) {
+        ...
+    }
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+    fn scene_with_boxes() -> (Camera, SceneBuilder) {
+        let mut builder = SceneBuilder::default();
+
+        let ground = builder.add_material(Material::lambertian(Vec3::new(1., 0.8, 0.1)));
+        let opaque = builder.add_material(Material::opaque(Vec3::new(0.9, 0.2, 0.4), 0.001));
+
+        builder.add_disc(
+            Disc {
+                center: Vec3::all(0.),
+                radius: 1000.,
+                normal: Vec3::new(0., 1., 0.)
+            },
+            ground
+        );
+
+        // TODO: add box
+
+        let camera = Camera::look_at(
+            Vec3::new(0., 1.2, 2.5),
+            Vec3::new(0., 0.5, 0.),
+            Vec3::new(0., 1., 0.)
+        ).with_fov(60_f32.to_radians());
+
+        (camera, builder)
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [scene-to-test-box]: <kbd>[gallery.rs]</kbd> Empty scene for boxes]
+</script>
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    ...
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+    struct Box {
+      origin: vec3f,
+      extent: vec3f,
+      v0: vec3f,
+      v1: vec3f,
+      v2: vec3f,
+      material_index: u32,
+    }
+
+    fn intersect_box(ray: Ray, box: Box) -> Intersection {
+      var largest_t_min = -FLT_MAX;
+      var smallest_t_max = FLT_MAX;
+      let normals = array<vec3f, 3>(box.v0, box.v1, box.v2);
+
+      for (var i = 0u; i < 3u; i += 1) {
+        let N = normals[i];
+        let n_dot_d = dot(N, ray.direction);
+        if abs(n_dot_d) == 0. {
+          // ray is parallel to the slab. Check if the ray origin falls within the extents.
+          if dot(ray.origin - box.origin, N) >= box.extent[i] {
+            return no_intersection();
+          }
+          continue;
+        }
+
+        let o = box.origin - ray.origin;
+        let t1 = dot(N, o) / n_dot_d;
+        let t2 = dot(N, o + normals[i] * box.extent[i]) / n_dot_d;
+
+        let t_min = min(t1, t2);
+        let t_max = max(t1, t2);
+
+        largest_t_min = max(largest_t_min, t_min);
+        smallest_t_max = min(smallest_t_max, t_max);
+      }
+
+      if largest_t_min > smallest_t_max || smallest_t_max < 0. {
+        return no_intersection();
+      }
+
+      // Select t_max if t_min is behind the ray origin.
+      let t = select(largest_t_min, smallest_t_max, largest_t_min < 0.);
+      // TODO: fix normal vector
+      return Intersection(vec3f(1, 0, 0), t, box.material_index);
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+
+    fn intersect_scene(ray: Ray) -> Intersection {
+      var closest_hit = no_intersection();
+      closest_hit.t = FLT_MAX;
+      for (var i = 0u; i < scene_uniforms.sphere_count; i += 1u) {
+        let sphere = spheres[i];
+        let hit = intersect_sphere(ray, sphere);
+        if hit.t > 0. && hit.t < closest_hit.t {
+          closest_hit = hit;
+        }
+      }
+      for (var i = 0u; i < scene_uniforms.disc_count; i += 1u) {
+        let disc = discs[i];
+        let hit = intersect_disc(ray, disc);
+        if hit.t > 0. && hit.t < closest_hit.t {
+          closest_hit = hit;
+        }
+      }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+      // Hard-coded box for testing
+      let box = Box(
+        vec3f(-0.5, 0., -0.5), vec3f(1),
+        vec3f(1, 0, 0),
+        vec3f(0, 1, 0),
+        vec3f(0, 0, 1),
+        1u
+      );
+      let hit = intersect_box(ray, box);
+      if hit.t > 0. && hit.t < closest_hit.t {
+        closest_hit = hit;
+      }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+      if closest_hit.t < FLT_MAX {
+        return closest_hit;
+      }
+      return no_intersection();
+    }
+
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [hardcoded-box-intersection]: <kbd>[shaders.wgsl]</kbd> `intersect_box`]
+</script>
+
+The code snippet above implements the slab intersection logic but it always assigns the same hard-coded normal
+vector. When you run the program, you should see a cube with incorrect shading:
+
+  ![Figure [box-with-broken-normals]: Box intersection with incorrect normals](../images/img-66-box-with-broken-normals.png)
+
+Fortunately, computing the normal is straightforward. The slab normal can be used directly if the
+intersection lies on one of the planes that are opposite the origin point. Otherwise, if the intersection
+is on one of the planes that intersect the origin, we need to negate the slab normal for it to face
+"outward".
+
+Let's track the normal vector alongside the min and max $t$ values:
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    ...
+
+    struct Box {
+      origin: vec3f,
+      extent: vec3f,
+      v0: vec3f,
+      v1: vec3f,
+      v2: vec3f,
+      material_index: u32,
+    }
+
+    fn intersect_box(ray: Ray, box: Box) -> Intersection {
+      var largest_t_min = -FLT_MAX;
+      var smallest_t_max = FLT_MAX;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+      var largest_t_min_normal = vec3f(0);
+      var smallest_t_max_normal = vec3f(0);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+      let normals = array<vec3f, 3>(box.v0, box.v1, box.v2);
+
+      for (var i = 0u; i < 3u; i += 1) {
+        let N = normals[i];
+        let n_dot_d = dot(N, ray.direction);
+        if abs(n_dot_d) == 0. {
+          // ray is parallel to the slab. Check if the ray origin falls within the extents.
+          if dot(ray.origin - box.origin, N) >= box.extent[i] {
+            return no_intersection();
+          }
+          continue;
+        }
+
+        let o = box.origin - ray.origin;
+        let t1 = dot(N, o) / n_dot_d;
+        let t2 = dot(N, o + normals[i] * box.extent[i]) / n_dot_d;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+        let N1 = -N;
+        let N2 =  N;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+
+        let t_min = min(t1, t2);
+        let t_max = max(t1, t2);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+        let N_min = select(N2, N1, t1 < t2);
+        let N_max = select(N2, N1, t1 > t2);
+
+        if t_min > largest_t_min {
+          largest_t_min = t_min;
+          largest_t_min_normal = N_min;
+        }
+        if t_max < smallest_t_max {
+          smallest_t_max = t_max;
+          smallest_t_max_normal = N_max;
+        }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+      }
+
+      if largest_t_min > smallest_t_max || smallest_t_max < 0. {
+        return no_intersection();
+      }
+
+      // Select t_max if t_min is behind the ray origin.
+      let t = select(largest_t_min, smallest_t_max, largest_t_min < 0.);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+      let N = select(largest_t_min_normal, smallest_t_max_normal, largest_t_min < 0.);
+      return Intersection(N, t, box.material_index);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    }
+
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [intersect-box-normals]: <kbd>[shaders.wgsl]</kbd> `intersect_box` with correct normals]
+</script>
+
+
+  ![Figure [box-with-broken-normals]: Box intersection with correct normals](../images/img-67-box-with-fixed-normals.png)
+
+
+You can technically combine an arbitrary number of oriented slabs to represent a volume. The slabs
+don't even have to be perpendicular. For example, let's rotate the horizontal slab to be positioned
+diagonally:
+
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    ...
+
+    fn intersect_scene(ray: Ray) -> Intersection {
+      var closest_hit = no_intersection();
+      closest_hit.t = FLT_MAX;
+      for (var i = 0u; i < scene_uniforms.sphere_count; i += 1u) {
+        let sphere = spheres[i];
+        let hit = intersect_sphere(ray, sphere);
+        if hit.t > 0. && hit.t < closest_hit.t {
+          closest_hit = hit;
+        }
+      }
+      for (var i = 0u; i < scene_uniforms.disc_count; i += 1u) {
+        let disc = discs[i];
+        let hit = intersect_disc(ray, disc);
+        if hit.t > 0. && hit.t < closest_hit.t {
+          closest_hit = hit;
+        }
+      }
+      // Hard-coded box for testing
+      let box = Box(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+        vec3f(-0.5, 1, -0.5), vec3f(1, 0.2, 1),
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+        vec3f(1, 0, 0),
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+        normalize(vec3f(1, 1, 0)),
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+        vec3f(0, 0, 1),
+        1u
+      );
+      let hit = intersect_box(ray, box);
+      if hit.t > 0. && hit.t < closest_hit.t {
+        closest_hit = hit;
+      }
+      if closest_hit.t < FLT_MAX {
+        return closest_hit;
+      }
+      return no_intersection();
+    }
+
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [diagonal-slab-example]: <kbd>[shaders.wgsl]</kbd> Diagonal slab]
+</script>
+
+
+  ![Figure [diagonal-slab]: Box with a diagonal slab](../images/img-68-diagonal-slab.png)
+
+
+Next, let's add boxes to the scene representation. We'll follow the usual steps for the bind group
+boilerplate in `shaders.wgsl`, `render.rs`, and `scene.rs`:
+
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    ...
+
+    fn intersect_scene(ray: Ray) -> Intersection {
+      var closest_hit = no_intersection();
+      closest_hit.t = FLT_MAX;
+      for (var i = 0u; i < scene_uniforms.sphere_count; i += 1u) {
+        let sphere = spheres[i];
+        let hit = intersect_sphere(ray, sphere);
+        if hit.t > 0. && hit.t < closest_hit.t {
+          closest_hit = hit;
+        }
+      }
+      for (var i = 0u; i < scene_uniforms.disc_count; i += 1u) {
+        let disc = discs[i];
+        let hit = intersect_disc(ray, disc);
+        if hit.t > 0. && hit.t < closest_hit.t {
+          closest_hit = hit;
+        }
+      }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+      for (var i = 0u; i < scene_uniforms.box_count; i += 1u) {
+        let box = boxes[i];
+        let hit = intersect_box(ray, box);
+        if hit.t > 0. && hit.t < closest_hit.t {
+          closest_hit = hit;
+        }
+      }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+      if closest_hit.t < FLT_MAX {
+        return closest_hit;
+      }
+      return no_intersection();
+    }
+
+    ...
+
+    struct SceneUniforms {
+      sphere_count: u32,
+      disc_count: u32,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+      box_count: u32,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    }
+
+    @group(1) @binding(0) var<uniform> scene_uniforms: sceneuniforms;
+    @group(1) @binding(1) var<storage> materials: array<material>;
+    @group(1) @binding(2) var<storage> spheres: array<sphere>;
+    @group(1) @binding(3) var<storage> discs: array<disc>;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL highlight
+    @group(1) @binding(4) var<storage> boxes: array<box>;
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WGSL
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [boxes-buffer-binding]: <kbd>[shaders.wgsl]</kbd> The `boxes` buffer binding]
+</script>
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+    fn create_pipeline(
+        device: &wgpu::Device,
+        shader_module: &wgpu::ShaderModule,
+    ) -> (wgpu::RenderPipeline, wgpu::BindGroupLayout, wgpu::BindGroupLayout) {
+        ...
+        let scene_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("scene resource layout"),
+                entries: &[
+                    // Uniforms
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    // Materials
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    // Spheres
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    // Discs
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+                    // Boxes
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 4,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+                  ],
+            });
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        ...
+    }
+    ...
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [boxes-bind-group-layout-entry]: <kbd>[render.rs]</kbd> The `boxes` buffer binding]
+</script>
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+
+    pub struct Sphere {
+        pub center: Vec3,
+        pub radius: f32,
+    }
+
+    pub struct Disc {
+        pub center: Vec3,
+        pub radius: f32,
+        pub normal: Vec3,
+    }
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+    pub struct Box {
+        pub origin: Vec3,
+        pub extent: Vec3,
+        pub v0: Vec3,
+        pub v1: Vec3,
+        pub v2: Vec3,
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+
+    #[derive(Debug, Copy, Clone, Pod, Zeroable)]
+    #[repr(C)]
+    struct SphereBufferEntry {
+        center: Vec3,
+        radius: f32,
+        material_index: u32,
+        _pad: [u32; 3],
+    }
+
+    #[derive(Debug, Copy, Clone, Pod, Zeroable)]
+    #[repr(C)]
+    struct DiscBufferEntry {
+        center: Vec3,
+        radius: f32,
+        normal: Vec3,
+        material_index: u32,
+    }
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+    #[derive(Debug, Copy, Clone, Pod, Zeroable)]
+    #[repr(C)]
+    struct BoxBufferEntry {
+        origin: Vec3,
+        _pad0: u32,
+        extent: Vec3,
+        _pad1: u32,
+        v0: Vec3,
+        _pad2: u32,
+        v1: Vec3,
+        _pad3: u32,
+        v2: Vec3,
+        material_index: u32,
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+
+    #[derive(Copy, Clone)]
+    pub struct MaterialId(u32);
+
+    #[derive(Default)]
+    pub struct SceneBuilder {
+        materials: Vec<Material>,
+        spheres: Vec<SphereBufferEntry>,
+        discs: Vec<DiscBufferEntry>,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        boxes: Vec<BoxBufferEntry>,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    }
+
+    impl SceneBuilder {
+        pub fn add_material(&mut self, material: Material) -> MaterialId {
+            self.materials.push(material);
+            MaterialId((self.materials.len() - 1).try_into().unwrap())
+        }
+
+        pub fn add_sphere(&mut self, sphere: Sphere, material: MaterialId) {
+            let entry = SphereBufferEntry {
+                center: sphere.center,
+                radius: sphere.radius,
+                material_index: material.0,
+                _pad: [0; 3],
+            };
+            self.spheres.push(entry)
+        }
+
+        pub fn add_disc(&mut self, disc: Disc, material: MaterialId) {
+            let entry = DiscBufferEntry {
+                center: disc.center,
+                radius: disc.radius,
+                normal: disc.normal,
+                material_index: material.0,
+            };
+            self.disc.push(entry)
+        }
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        pub fn add_box(&mut self, box_: Box, material: MaterialId) {
+            let entry = BoxBufferEntry {
+                origin: box_.origin,
+                _pad0: 0,
+                extent: box_.extent,
+                _pad1: 0,
+                v0: box_.v0,
+                _pad2: 0,
+                v1: box_.v1,
+                _pad3: 0,
+                v2: box_.v2,
+                material_index: material.0,
+            };
+            self.boxes.push(entry)
+        }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+
+        pub fn build(
+            self,
+            device: &wgpu::Device,
+            layout: &wgpu::BindGroupLayout,
+        ) -> wgpu::BindGroup {
+            let uniform_buffer = create_uniform_buffer_with_data(
+                device,
+                SceneUniforms {
+                    sphere_count: self.spheres.len() as u32,
+                    disc_count: self.discs.len() as u32,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+                    box_count: self.boxes.len() as u32,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+                },
+                Some("scene uniforms")
+            );
+            let material_buffer =
+                create_storage_buffer_with_data(device, &self.materials, Some("materials"));
+            let spheres_buffer =
+                create_storage_buffer_with_data(device, &self.spheres, Some("spheres"));
+            let discs_buffer =
+                create_storage_buffer_with_data(device, &self.discs, Some("discs"));
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+            let boxes_buffer =
+                create_storage_buffer_with_data(device, &self.boxes, Some("boxes"));
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("scene resources"),
+                layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &uniform_buffer,
+                            offset: 0,
+                            size: None,
+                        }),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &material_buffer,
+                            offset: 0,
+                            size: None,
+                        }),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &spheres_buffer,
+                            offset: 0,
+                            size: None,
+                        }),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &discs_buffer,
+                            offset: 0,
+                            size: None,
+                        }),
+                    },
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &boxes_buffer,
+                            offset: 0,
+                            size: None,
+                        }),
+                    },
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+                ],
+            })
+        }
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [scene-builder-build-with-boxes]: <kbd>[scene.rs]</kbd> `SceneBuilder::add_box`]
+</script>
+
+Now, let's create a scene using only boxes:
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+
+    fn scene_with_boxes() -> (Camera, SceneBuilder) {
+        let mut builder = SceneBuilder::default();
+
+        let ground = builder.add_material(Material::lambertian(Vec3::new(1., 0.8, 0.1)));
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        let magenta = builder.add_material(Material::opaque(Vec3::new(0.9, 0.2, 0.4), 0.001));
+        let red = builder.add_material(Material::metal(Vec3::new(0.8, 0.1, 0.1)));
+        let matte = builder.add_material(Material::lambertian(Vec3::all(0.8)));
+        let glass = builder.add_material(
+            Material::transparent_dielectric(Vec3::new(0.8, 1., 0.9), 1.5)
+        );
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+
+        builder.add_disc(
+            Disc {
+                center: Vec3::all(0.),
+                radius: 1000.,
+                normal: Vec3::new(0., 1., 0.)
+            },
+            ground
+        );
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        builder.add_box(
+            Box {
+                origin: Vec3::new(-1.5, 0., -1.5),
+                extent: Vec3::new(3., 0.25, 3.),
+                v0: Vec3::new(1., 0., 0.),
+                v1: Vec3::new(0., 1., 0.),
+                v2: Vec3::new(0., 0., 1.),
+            },
+            magenta
+        );
+        builder.add_box(
+            Box {
+                origin: Vec3::new(-1., 0.25, -1.),
+                extent: Vec3::new(0.75, 1., 0.75),
+                v0: Vec3::new(1., 0., 0.),
+                v1: Vec3::new(0., 1., 0.),
+                v2: Vec3::new(0., 0., 1.),
+            },
+            matte
+        );
+        builder.add_box(
+            Box {
+                origin: Vec3::new(0.25, 0.25, -1.),
+                extent: Vec3::new(0.75, 1., 0.75),
+                v0: Vec3::new(1., 0., 0.),
+                v1: Vec3::new(0., 1., 0.),
+                v2: Vec3::new(0., 0., 1.),
+            },
+            matte
+        );
+        builder.add_box(
+            Box {
+                origin: Vec3::new(-1., 0.25, 0.25),
+                extent: Vec3::new(0.5, 0.5, 0.75),
+                v0: Vec3::new(1., 0., 0.),
+                v1: Vec3::new(0., 1., 0.),
+                v2: Vec3::new(0., 0., 1.),
+            },
+            matte
+        );
+        builder.add_box(
+            Box {
+                origin: Vec3::new(0.5, 0.25, 0.25),
+                extent: Vec3::new(0.5, 0.5, 0.75),
+                v0: Vec3::new(1., 0., 0.),
+                v1: Vec3::new(0., 1., 0.),
+                v2: Vec3::new(0., 0., 1.),
+            },
+            matte
+        );
+        builder.add_box(
+            Box {
+                origin: Vec3::new(-1., 1.25, -1.),
+                extent: Vec3::new(2., 0.2, 0.75),
+                v0: Vec3::new(1., 0., 0.),
+                v1: Vec3::new(0., 1., 0.),
+                v2: Vec3::new(0., 0., 1.),
+            },
+            matte
+        );
+        builder.add_box(
+            Box {
+                origin: Vec3::new(-1., 0.75, 0.25),
+                extent: Vec3::new(2., 0.15, 0.75),
+                v0: Vec3::new(1., 0., 0.),
+                v1: Vec3::new(0., 1., 0.),
+                v2: Vec3::new(0., 0., 1.),
+            },
+            glass
+        );
+        builder.add_box(
+            Box {
+                origin: Vec3::new(-0.4, 0.9, 0.5),
+                extent: Vec3::new(0.2, 0.2, 0.2),
+                v0: Vec3::new(1., 0., 1.).normalized(),
+                v1: Vec3::new(0., 1., 0.),
+                v2: Vec3::new(-1., 0., 1.).normalized(),
+            },
+            red 
+        );
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+
+        let camera = Camera::look_at(
+            Vec3::new(0., 1.2, 2.5),
+            Vec3::new(0., 0.5, 0.),
+            Vec3::new(0., 1., 0.)
+        ).with_fov(60_f32.to_radians());
+
+        (camera, builder)
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [scene-with-boxes-code]: <kbd>[gallery.rs]</kbd> Scene with boxes]
+</script>
+
+Let's run the program and see what it looks like:
+
+  ![Figure [scene-with-boxes]: Scene with boxes](../images/img-69-scene-with-boxes.png)
+
+This already looks quite a bit more interesting than our earlier scenes. Let's add in some discs
+and spheres too:
+
+<script type="preformatted">
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+    ...
+
+    fn scene_with_boxes() -> (Camera, SceneBuilder) {
+        let mut builder = SceneBuilder::default();
+
+        let ground = builder.add_material(Material::lambertian(Vec3::new(1., 0.8, 0.1)));
+        let magenta = builder.add_material(Material::opaque(Vec3::new(0.9, 0.2, 0.4), 0.001));
+        let red = builder.add_material(Material::metal(Vec3::new(0.8, 0.1, 0.1)));
+        let matte = builder.add_material(Material::lambertian(Vec3::all(0.8)));
+        let glass = builder.add_material(
+            Material::transparent_dielectric(Vec3::new(0.8, 1., 0.9), 1.5)
+        );
+
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        let crimson_frame = builder.add_material(
+            Material::lambertian(Vec3::new(0.6, 0.16, 0.16))
+        );
+        let blue_frame = builder.add_material(Material::lambertian(Vec3::new(0.16, 0.16, 0.6)));
+        let mirror = builder.add_material(Material::metal(Vec3::all(0.95)));
+        let green = builder.add_material(Material::opaque(Vec3::new(0.2, 0.9, 0.4), 0.2));
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+
+        builder.add_disc(
+            Disc {
+                center: Vec3::all(0.),
+                radius: 1000.,
+                normal: Vec3::new(0., 1., 0.)
+            },
+            ground
+        );
+        builder.add_box(
+            Box {
+                origin: Vec3::new(-1.5, 0., -1.5),
+                extent: Vec3::new(3., 0.25, 3.),
+                v0: Vec3::new(1., 0., 0.),
+                v1: Vec3::new(0., 1., 0.),
+                v2: Vec3::new(0., 0., 1.),
+            },
+            magenta
+        );
+        builder.add_box(
+            Box {
+                origin: Vec3::new(-1., 0.25, -1.),
+                extent: Vec3::new(0.75, 1., 0.75),
+                v0: Vec3::new(1., 0., 0.),
+                v1: Vec3::new(0., 1., 0.),
+                v2: Vec3::new(0., 0., 1.),
+            },
+            matte
+        );
+        builder.add_box(
+            Box {
+                origin: Vec3::new(0.25, 0.25, -1.),
+                extent: Vec3::new(0.75, 1., 0.75),
+                v0: Vec3::new(1., 0., 0.),
+                v1: Vec3::new(0., 1., 0.),
+                v2: Vec3::new(0., 0., 1.),
+            },
+            matte
+        );
+        builder.add_box(
+            Box {
+                origin: Vec3::new(-1., 0.25, 0.25),
+                extent: Vec3::new(0.5, 0.5, 0.75),
+                v0: Vec3::new(1., 0., 0.),
+                v1: Vec3::new(0., 1., 0.),
+                v2: Vec3::new(0., 0., 1.),
+            },
+            matte
+        );
+        builder.add_box(
+            Box {
+                origin: Vec3::new(0.5, 0.25, 0.25),
+                extent: Vec3::new(0.5, 0.5, 0.75),
+                v0: Vec3::new(1., 0., 0.),
+                v1: Vec3::new(0., 1., 0.),
+                v2: Vec3::new(0., 0., 1.),
+            },
+            matte
+        );
+        builder.add_box(
+            Box {
+                origin: Vec3::new(-1., 1.25, -1.),
+                extent: Vec3::new(2., 0.2, 0.75),
+                v0: Vec3::new(1., 0., 0.),
+                v1: Vec3::new(0., 1., 0.),
+                v2: Vec3::new(0., 0., 1.),
+            },
+            matte
+        );
+        builder.add_box(
+            Box {
+                origin: Vec3::new(-1., 0.75, 0.25),
+                extent: Vec3::new(2., 0.15, 0.75),
+                v0: Vec3::new(1., 0., 0.),
+                v1: Vec3::new(0., 1., 0.),
+                v2: Vec3::new(0., 0., 1.),
+            },
+            glass
+        );
+        builder.add_box(
+            Box {
+                origin: Vec3::new(-0.4, 0.9, 0.5),
+                extent: Vec3::new(0.2, 0.2, 0.2),
+                v0: Vec3::new(1., 0., 1.).normalized(),
+                v1: Vec3::new(0., 1., 0.),
+                v2: Vec3::new(-1., 0., 1.).normalized(),
+            },
+            red
+        );
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+        builder.add_disc(
+            Disc {
+                center: Vec3::new(-0.6, 1., -0.249),
+                radius: 0.25,
+                normal: Vec3::new(0., 0., 1.)
+            },
+            crimson_frame
+        );
+        builder.add_disc(
+            Disc {
+                center: Vec3::new(0.6, 1., -0.249),
+                radius: 0.25,
+                normal: Vec3::new(0., 0., 1.)
+            },
+            blue_frame
+        );
+        builder.add_disc(
+            Disc {
+                center: Vec3::new(-0.6, 1., -0.245),
+                radius: 0.2,
+                normal: Vec3::new(0., 0., 1.)
+            },
+            mirror
+        );
+        builder.add_disc(
+            Disc {
+                center: Vec3::new(0.6, 1., -0.245),
+                radius: 0.2,
+                normal: Vec3::new(0., 0., 1.)
+            },
+            mirror
+        );
+        builder.add_sphere(
+            Sphere {
+                center: Vec3::new(0.4, 0.95, 0.5),
+                radius: 0.1
+            },
+            green
+        );
+        builder.add_sphere(
+            Sphere {
+                center: Vec3::new(0.7, 0.9, 0.7),
+                radius: 0.05
+            },
+            red
+        );
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+
+        let camera = Camera::look_at(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust highlight
+            Vec3::new(0.993, 1.249, 1.406),
+            Vec3::new(-0.047, 0.709, -0.0516),
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Rust
+            Vec3::new(0., 1., 0.)
+        ).with_fov(60_f32.to_radians());
+
+        (camera, builder)
+    }
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    [Listing [scene-with-boxes-code]: <kbd>[gallery.rs]</kbd> Scene with boxes]
+</script>
+
+  ![Figure [scene-with-boxes-discs-spheres]: Putting all shapes together](../images/img-70-scene-with-boxes-discs-spheres.png)
+
+Even though the shapes are very basic, you may recognize some of the objects from every day life
+(e.g. a glass tabletop, a doorway, and mirrors). With more complex shapes and by paying attention to
+their composition, you can create scenes that are a lot more intricate. If you're interested in supporting
+new shapes in your renderer, I recommend [this article](https://iquilezles.org/articles/intersectors/) by
+Iñigo Quilez (of [ShaderToy](https://www.shadertoy.com) and Pixar fame) with 17 different ray-intersection
+function examples as a reference (check out torus and the "Goursat" for some interesting ones). I also
+recommend the book _Real Time Collision Detection_ by Christer Ericson ([#Ericson2005]) as a general
+reference on intersection math (while the book primarily focuses on collision detection in a physics engine,
+the concepts are just as applicable to ray tracing).
+
+
+[^ch12-footnote2]: The technique seems to have been first described in a 1986 article by Timothy L. Kay and James T. Kajiya titled ["Ray Tracing Complex Scenes"](https://dl.acm.org/doi/10.1145/15886.15916). They describe using slabs to represent arbitrary convex boounding shapes for complex geometry for cheaper preliminary intersection tests. We'll talk about bounding shapes later in this book.
 
 <!-- <p class="dinkus"> * * * </p> -->
 <!--

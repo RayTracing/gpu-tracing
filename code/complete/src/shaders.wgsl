@@ -122,8 +122,8 @@ fn intersect_sphere(ray: Ray, sphere: Sphere) -> Intersection {
   let mb = -b;
   let t1 = (mb - sqrt_d) * recip_a;
   let t2 = (mb + sqrt_d) * recip_a;
-  let t = select(t2, t1, t1 >= EPSILON);
-  if t < EPSILON {
+  let t = select(t2, t1, t1 > 0.);
+  if t <= 0. {
     return no_intersection();
   }
 
@@ -146,7 +146,7 @@ fn intersect_disc(ray: Ray, disc: Disc) -> Intersection {
   }
   let o = disc.center - ray.origin;
   let t = dot(disc.normal, o) / n_dot_d;
-  if t < EPSILON {
+  if t <= 0. {
     return no_intersection();
   }
   let p = t * ray.direction - o;
@@ -154,6 +154,64 @@ fn intersect_disc(ray: Ray, disc: Disc) -> Intersection {
     return no_intersection();
   }
   return Intersection(disc.normal, t, disc.material_index);
+}
+
+struct Box {
+  origin: vec3f,
+  extent: vec3f,
+  v0: vec3f,
+  v1: vec3f,
+  v2: vec3f,
+  material_index: u32,
+}
+
+fn intersect_box(ray: Ray, box: Box) -> Intersection {
+  var largest_t_min = -FLT_MAX;
+  var smallest_t_max = FLT_MAX;
+  var largest_t_min_normal = vec3f(0);
+  var smallest_t_max_normal = vec3f(0);
+  let normals = array<vec3f, 3>(box.v0, box.v1, box.v2);
+
+  for (var i = 0u; i < 3u; i += 1) {
+    let N = normals[i];
+    let n_dot_d = dot(N, ray.direction);
+    if abs(n_dot_d) == 0. {
+      // ray is parallel to the slab. Check if the ray origin falls within the extents.
+      if dot(ray.origin - box.origin, N) >= box.extent[i] {
+        return no_intersection();
+      }
+      continue;
+    }
+
+    let o = box.origin - ray.origin;
+    let t1 = dot(N, o) / n_dot_d;
+    let t2 = dot(N, o + normals[i] * box.extent[i]) / n_dot_d;
+    let N1 = -N;
+    let N2 =  N;
+
+    let t_min = min(t1, t2);
+    let t_max = max(t1, t2);
+    let N_min = select(N2, N1, t1 < t2);
+    let N_max = select(N2, N1, t1 > t2);
+
+    if t_min > largest_t_min {
+      largest_t_min = t_min;
+      largest_t_min_normal = N_min;
+    }
+    if t_max < smallest_t_max {
+      smallest_t_max = t_max;
+      smallest_t_max_normal = N_max;
+    }
+  }
+
+  if largest_t_min > smallest_t_max || smallest_t_max < 0. {
+    return no_intersection();
+  }
+
+  // Select t_max if t_min is behind the ray origin.
+  let t = select(largest_t_min, smallest_t_max, largest_t_min < 0.);
+  let N = select(largest_t_min_normal, smallest_t_max_normal, largest_t_min < 0.);
+  return Intersection(N, t, box.material_index);
 }
 
 fn intersect_scene(ray: Ray) -> Intersection {
@@ -169,6 +227,13 @@ fn intersect_scene(ray: Ray) -> Intersection {
   for (var i = 0u; i < scene_uniforms.disc_count; i += 1u) {
     let disc = discs[i];
     let hit = intersect_disc(ray, disc);
+    if hit.t > 0. && hit.t < closest_hit.t {
+      closest_hit = hit;
+    }
+  }
+  for (var i = 0u; i < scene_uniforms.box_count; i += 1u) {
+    let box = boxes[i];
+    let hit = intersect_box(ray, box);
     if hit.t > 0. && hit.t < closest_hit.t {
       closest_hit = hit;
     }
@@ -251,14 +316,16 @@ fn scatter(input_ray: Ray, hit: Intersection, material: Material) -> Scatter {
   }
 
   var scattered: vec3f;
+  var offset = EPSILON;
   if choose_specular {
     scattered = reflect(incident, N);
   } else if is_transmissive {
     scattered = refract(incident, N, ref_ratio);
+    offset *= -1;
   } else {
     scattered = sample_lambertian(N);
   }
-  let output_ray = Ray(point_on_ray(input_ray, hit.t), scattered);
+  let output_ray = Ray(point_on_ray(input_ray, hit.t) + N * offset, scattered);
   return Scatter(attenuation, output_ray);
 }
 
@@ -284,12 +351,14 @@ fn sky_color(ray: Ray) -> vec3f {
 struct SceneUniforms {
   sphere_count: u32,
   disc_count: u32,
+  box_count: u32,
 }
 
 @group(1) @binding(0) var<uniform> scene_uniforms: SceneUniforms;
 @group(1) @binding(1) var<storage> materials: array<Material>;
 @group(1) @binding(2) var<storage> spheres: array<Sphere>;
 @group(1) @binding(3) var<storage> discs: array<Disc>;
+@group(1) @binding(4) var<storage> boxes: array<Box>;
 
 @group(0) @binding(1) var radiance_samples_old: texture_2d<f32>;
 @group(0) @binding(2) var radiance_samples_new: texture_storage_2d<rgba32float, write>;
